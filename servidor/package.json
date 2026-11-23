@@ -1,0 +1,1 @@
+{ "name": "autopick-runas", "private": true, "type": "module", "scripts": { "test": "node teste.mjs", "dev": "wrangler dev", "deploy": "wrangler deploy" } }

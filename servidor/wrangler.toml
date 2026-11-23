@@ -1,0 +1,15 @@
+name = "autopick-runas"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+# Uma rodada por minuto: ~6 pedidos à Riot (cabe no limite da chave pessoal).
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "autopick-runas"
+database_id = "COLE_AQUI_O_ID_DO_D1"
+
+[vars]
+PARTIDAS_POR_RODADA = "5"
