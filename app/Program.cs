@@ -513,7 +513,7 @@ class RunasForm : Form
             Texto(caixa, "★ " + (r != null ? r.Nome : "?"), 8, 6, 200, 20, Cores.Texto, 9.5f, FontStyle.Bold);
             Texto(caixa, (ep != null ? ep.Nome : "?") + " + " + (es != null ? es.Nome : "?"), 8, 27, 270, 18, Cores.Sutil);
             Texto(caixa, (taxa * 100).ToString("0.0", br) + "% de vitória", 8, 48, 180, 20, taxa >= 0.5 ? Cores.Verde : Cores.Laranja, 10f, FontStyle.Bold);
-            Texto(caixa, p.Jogos.ToString("N0", br) + " jogos · " + (total > 0 ? ((double)p.Jogos / total * 100).ToString("0", br) + "% das partidas" : ""), 8, 72, 220, 18, Cores.Sutil, 8f);
+            Texto(caixa, p.Jogos.ToString("N0", br) + " jogos · " + (total > 0 ? ((double)p.Jogos / total * 100).ToString("0", br) + "% das partidas" : ""), 8, 72, 200, 18, Cores.Sutil, 8f);
             var usar = Botao("Usar", Cores.Roxo, new Point(214, 52), 68); usar.Height = 32;
             var pg = p; usar.Click += (o, e) => Carregar(pg);
             caixa.Controls.Add(usar);
