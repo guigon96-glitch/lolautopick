@@ -306,9 +306,9 @@ class Vaga : Animado
         if (id != null && id != Id) pop = 1;
         Id = id; Nome = nome; icone = ic; Cor = cor; arvorePrim = prim; arvoreSec = sec; Animar();
     }
-    // botão de runas no canto inferior direito (árvore principal + secundária): abre o editor de runas do campeão
-    RectangleF AreaRuna { get { return new RectangleF(Width - 27, Height - 27, 26, 26); } }
-    RectangleF AreaSec { get { return new RectangleF(Width - 41, Height - 21, 19, 19); } }
+    // botão de runas no canto inferior esquerdo: árvore principal e, à direita dela, a secundária menor; abre o editor de runas
+    RectangleF AreaRuna { get { return new RectangleF(1, Height - 27, 26, 26); } }
+    RectangleF AreaSec { get { return new RectangleF(23, Height - 21, 19, 19); } }
     public bool NaRuna(Point p) { return Id != null && (AreaRuna.Contains(p) || (arvorePrim != null && AreaSec.Contains(p))); }
     protected override void OnMouseMove(MouseEventArgs e) { var s = NaRuna(e.Location); if (s != sobreRuna) { sobreRuna = s; Invalidate(); } base.OnMouseMove(e); }
     protected override void OnMouseLeave(EventArgs e) { sobreRuna = false; base.OnMouseLeave(e); }
@@ -339,7 +339,7 @@ class Vaga : Animado
         var anel = new Pen(sobreRuna ? Cores.Ouro : Cores.Roxo, sobreRuna ? 2.5f : 1.5f);
         if (arvorePrim != null && arvoreSec != null)
         {
-            // secundária menor, atrás e à esquerda da principal
+            // secundária menor, à direita da principal (desenhada antes, fica por baixo)
             var sr = AreaSec;
             using (var b = new SolidBrush(Cores.Fundo)) g.FillEllipse(b, sr);
             Imagem(g, arvoreSec, new RectangleF(sr.X + 2, sr.Y + 2, sr.Width - 4, sr.Height - 4), sr.Width, 1f);
