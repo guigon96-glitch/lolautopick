@@ -399,10 +399,15 @@ class BotaoRuna : Animado
 class PaginaStat : Pagina { public int Jogos, Vitorias; }
 
 // Cartão de uma página popular: pedra angular grande, 3 principais + 2 secundárias, % de vitória e jogos. Clique usa a página.
+// Com título (mono/pro): nome do jogador e elo/time em cima, e o total é o das partidas dele.
 class CartaoPagina : Animado
 {
-    readonly PaginaStat p; readonly int total;
-    public CartaoPagina(PaginaStat pg, int totalJogos) { p = pg; total = totalJogos; Size = new Size(290, 68); Font = new Font("Segoe UI", 8f); }
+    readonly PaginaStat p; readonly int total; readonly string titulo, sub, rotuloTotal;
+    public CartaoPagina(PaginaStat pg, int totalJogos, string tituloJogador = null, string subtitulo = null)
+    {
+        p = pg; total = totalJogos; titulo = tituloJogador; sub = subtitulo; rotuloTotal = titulo == null ? "% escolha" : "% dos jogos dele";
+        Size = new Size(290, titulo == null ? 68 : 90); Font = new Font("Segoe UI", 8f);
+    }
     void Icone(Graphics g, int id, RectangleF r)
     {
         var ru = DadosRunas.Achar(id); Image img = null;
@@ -418,16 +423,26 @@ class CartaoPagina : Animado
             using (var b = new SolidBrush(Cores.Mix(Cores.CartaoHover, Color.FromArgb(52, 62, 96), hover))) g.FillPath(b, c);
             using (var pen = new Pen(Cores.Mix(Cores.Linha, Cores.Roxo, hover), 1.5f)) g.DrawPath(pen, c);
         }
-        Icone(g, p.Perks[0], new RectangleF(8, 10, 48, 48));
-        for (int i = 1; i < 6; i++) Icone(g, p.Perks[i], new RectangleF(64 + (i - 1) * 27 + (i >= 4 ? 10 : 0), 8, 25, 25));
+        int dy = 0;
+        if (titulo != null)
+        {
+            dy = 22;
+            using (var f = new Font("Segoe UI", 9f, FontStyle.Bold)) using (var b = new SolidBrush(Cores.Texto))
+            {
+                g.DrawString(titulo, f, b, 8, 5);
+                using (var s2 = new SolidBrush(Cores.Ouro)) g.DrawString(sub ?? "", Font, s2, 12 + g.MeasureString(titulo, f).Width, 7);
+            }
+        }
+        Icone(g, p.Perks[0], new RectangleF(8, 10 + dy, 48, 48));
+        for (int i = 1; i < 6; i++) Icone(g, p.Perks[i], new RectangleF(64 + (i - 1) * 27 + (i >= 4 ? 10 : 0), 8 + dy, 25, 25));
         var br = new System.Globalization.CultureInfo("pt-BR");
         double taxa = p.Jogos > 0 ? (double)p.Vitorias / p.Jogos : 0;
         using (var f = new Font("Segoe UI", 9.5f, FontStyle.Bold)) using (var b = new SolidBrush(taxa >= 0.5 ? Cores.Verde : Cores.Laranja))
-            g.DrawString((taxa * 100).ToString("0.0", br) + "%", f, b, 62, 40);
+            g.DrawString((taxa * 100).ToString("0.0", br) + "%", f, b, 62, 40 + dy);
         using (var b = new SolidBrush(Cores.Sutil))
-            g.DrawString(p.Jogos.ToString("N0", br) + " jogos" + (total > 0 ? " · " + ((double)p.Jogos / total * 100).ToString("0", br) + "% escolha" : ""), Font, b, 116, 42);
+            g.DrawString(p.Jogos.ToString("N0", br) + " jogos" + (total > 0 ? " · " + ((double)p.Jogos / total * 100).ToString("0", br) + rotuloTotal : ""), Font, b, 116, 42 + dy);
         if (hover > 0.01f) using (var f = new Font("Segoe UI", 9f, FontStyle.Bold)) using (var b = new SolidBrush(Color.FromArgb((int)(255 * hover), Cores.Roxo)))
-            g.DrawString("Usar", f, b, Width - 46, 10);
+            g.DrawString("Usar", f, b, Width - 46, 10 + dy);
     }
 }
 
@@ -442,6 +457,10 @@ class RunasForm : Form
     readonly ToolTip dica = new ToolTip { InitialDelay = 200 };
     readonly int key; readonly string rota; string servidor; readonly Action<string> salvarServidor;
     Pagina rec;
+    // Abas do painel: Geral (páginas mais usadas), Monos e Pros. Cada item: página + título/subtítulo + total.
+    string aba = "geral";
+    readonly Dictionary<string, Chip> abas = new Dictionary<string, Chip>();
+    Dictionary<string, List<Tuple<PaginaStat, string, string, int>>> dados;
 
     public RunasForm(string nome, Pagina atual, Func<Pagina> buscar, int chaveCampeao, string rotaAtual, string servidorRunas, Action<string> guardarServidor)
     {
@@ -454,7 +473,14 @@ class RunasForm : Form
         var lado = new Panel { Location = new Point(780, 12), Size = new Size(306, 580), BackColor = Cores.Cartao };
         lado.Controls.Add(new Label { Text = "Mais usadas no BR", Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Cores.Ouro, Location = new Point(10, 8), AutoSize = true });
         lado.Controls.Add(new Label { Text = (rota == "" ? "Todas as rotas" : Janela.NomePos(rota.ToLowerInvariant())) + " · Esmeralda+", ForeColor = Cores.Sutil, Location = new Point(11, 30), AutoSize = true });
-        painelStats = new Panel { Location = new Point(0, 52), Size = new Size(306, 364) };
+        int xa = 8;
+        foreach (var a in new[] { new[] { "geral", "Geral" }, new[] { "monos", "Monos" }, new[] { "pros", "Pros" } })
+        {
+            var chave = a[0]; var c = new Chip(a[1], Cores.Roxo) { Location = new Point(xa, 50), Selecionado = chave == aba };
+            c.Size = new Size(c.Width - 6, 28); c.Click += (o, e) => { aba = chave; foreach (var kv in abas) kv.Value.Selecionado = kv.Key == aba; DesenharAba(); };
+            abas[chave] = c; lado.Controls.Add(c); xa += c.Width + 4;
+        }
+        painelStats = new Panel { Location = new Point(0, 84), Size = new Size(306, 334), AutoScroll = true };
         lado.Controls.Add(painelStats);
         lado.Controls.Add(new Label { Text = "Recomendada pelo LoL", Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Cores.Ouro, Location = new Point(10, 424), AutoSize = true });
         recTexto = new Label { Location = new Point(10, 448), Size = new Size(286, 36), ForeColor = Cores.Texto, Text = "Buscando no cliente..." };
@@ -529,23 +555,61 @@ class RunasForm : Form
             painelStats.Controls.Add(trocar);
             return;
         }
+        Func<object, PaginaStat> pagina = o =>
+        {
+            var x = J.D(o); if (x == null) return null;
+            var p = new PaginaStat { Primaria = J.I(J.G(x, "primaria")), Secundaria = J.I(J.G(x, "secundaria")), Perks = J.A(J.G(x, "perks")).Select(J.I).ToList() };
+            return p.Completa ? p : null;
+        };
         int total = J.I(J.G(d, "total"));
-        var lista = J.A(J.G(d, "paginas")).Select(J.D).Where(x => x != null).Select(x => new PaginaStat
+        dados = new Dictionary<string, List<Tuple<PaginaStat, string, string, int>>>();
+        dados["geral"] = J.A(J.G(d, "paginas")).Select(o => { var p = pagina(o); if (p != null) { p.Jogos = J.I(J.G(J.D(o), "jogos")); p.Vitorias = J.I(J.G(J.D(o), "vitorias")); } return p; })
+            .Where(p => p != null).Select(p => Tuple.Create(p, (string)null, (string)null, total)).ToList();
+        var br = new System.Globalization.CultureInfo("pt-BR");
+        Func<string, List<Tuple<PaginaStat, string, string, int>>> jogadores = campo => J.A(J.G(d, campo)).Select(J.D).Where(x => x != null).Select(x =>
         {
-            Primaria = J.I(J.G(x, "primaria")), Secundaria = J.I(J.G(x, "secundaria")), Perks = J.A(J.G(x, "perks")).Select(J.I).ToList(),
-            Jogos = J.I(J.G(x, "jogos")), Vitorias = J.I(J.G(x, "vitorias"))
-        }).Where(p => p.Completa).ToList();
-        if (lista.Count == 0) { Texto(painelStats, "Ainda sem partidas suficientes desse campeão" + (rota == "" ? "" : " nessa rota") + ". O servidor coleta o dia todo; volte mais tarde.", 10, 4, 286, 60, Cores.Sutil); return; }
+            var p = pagina(J.G(x, "pagina")); if (p == null) return null;
+            p.Jogos = J.I(J.G(x, "jogos")); p.Vitorias = J.I(J.G(x, "vitorias"));
+            var nome = J.S(J.G(x, "nome")); var pro = J.S(J.G(x, "pro"));
+            var sub = pro != "" ? pro : NomeElo(J.S(J.G(x, "tier"))) + (J.G(x, "pdl") != null && J.S(J.G(x, "tier")) != "" ? " " + J.I(J.G(x, "pdl")).ToString("N0", br) + " PDL" : "");
+            return Tuple.Create(p, nome == "" ? "Jogador" : nome, sub, J.I(J.G(x, "total")));
+        }).Where(t => t != null).ToList();
+        dados["monos"] = jogadores("monos"); dados["pros"] = jogadores("pros");
+        DesenharAba();
+    }
+
+    static string NomeElo(string tier)
+    {
+        switch (tier)
+        {
+            case "CHALLENGER": return "Desafiante"; case "GRANDMASTER": return "Grão-Mestre"; case "MASTER": return "Mestre";
+            case "DIAMOND": return "Diamante"; case "EMERALD": return "Esmeralda"; default: return tier;
+        }
+    }
+
+    void DesenharAba()
+    {
+        if (dados == null) return; // ainda carregando ou sem servidor
+        foreach (Control c in painelStats.Controls.Cast<Control>().ToList()) c.Dispose();
+        painelStats.Controls.Clear();
+        var lista = dados[aba];
+        if (lista.Count == 0)
+        {
+            Texto(painelStats, aba == "geral" ? "Ainda sem partidas suficientes desse campeão" + (rota == "" ? "" : " nessa rota") + ". O servidor coleta o dia todo; volte mais tarde."
+                : aba == "monos" ? "Nenhum mono desse campeão encontrado ainda. Mono = 8+ jogos com ele e pelo menos metade das partidas do jogador."
+                : "Nenhum pro jogando esse campeão. A lista de pros fica em servidor/src/pros.js no GitHub (Riot ID e time).", 10, 4, 286, 80, Cores.Sutil);
+            return;
+        }
         int y = 2;
-        foreach (var p in lista)
+        foreach (var t in lista)
         {
-            var pg = p;
-            var cartao = new CartaoPagina(pg, total) { Location = new Point(8, y) };
+            var pg = t.Item1;
+            var cartao = new CartaoPagina(pg, t.Item4, t.Item2, t.Item3) { Location = new Point(8, y) };
             cartao.Click += (o, e) => Carregar(pg);
             var ep = DadosRunas.EstiloDe(pg.Primaria); var es = DadosRunas.EstiloDe(pg.Secundaria);
             dica.SetToolTip(cartao, "Clique para usar\n" + (ep != null ? ep.Nome : "?") + " + " + (es != null ? es.Nome : "?") + "\n\n" + string.Join("\n",
                 pg.Perks.Take(6).Select(id => { var x = DadosRunas.Achar(id); return x != null ? x.Nome : id.ToString(); }).Concat(pg.Perks.Skip(6).Select(DadosRunas.NomeFragmento))));
-            painelStats.Controls.Add(cartao); y += 72;
+            painelStats.Controls.Add(cartao); y += cartao.Height + 4;
         }
     }
 

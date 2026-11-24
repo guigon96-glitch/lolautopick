@@ -6,7 +6,7 @@ Programa para Windows que, junto com o cliente do League of Legends:
 - **marca o pick** assim que a seleção abre e **trava** na sua vez, pela lista da rota em que você caiu (5 por rota + lista "Qualquer" de reserva);
 - **bane** pela lista da rota, esperando 5 s para não banir o que um aliado quer jogar;
 - **cria a página de runas** do campeão travado: a sua (montada no editor, igual ao do cliente) ou a recomendada pelo LoL;
-- mostra no editor as **runas mais usadas no BR com % de vitória**, vindas do seu servidor (pasta `servidor/`).
+- mostra no editor as **runas mais usadas no BR com % de vitória**, e as dos **monos** e **pros** de cada campeão, vindas do seu servidor (pasta `servidor/`).
 
 ## Baixar
 
@@ -20,7 +20,8 @@ Se o LoL não estiver em `C:\Riot Games\League of Legends`, ajuste `pastaLol` no
 ## Como funciona
 
 - `app/Program.cs`: o programa inteiro (WinForms). Fala com o cliente pela API local dele (LCU), usando o `lockfile` da pasta do LoL. Campeões, runas e ícones vêm do Data Dragon (público, sempre do patch atual).
-- `servidor/`: Cloudflare Worker + D1. A cada minuto lê algumas partidas ranqueadas Solo/Duo do BR de Esmeralda para cima na API da Riot e soma jogos e vitórias por página de runas (campeão + rota + patch). `GET /runas?campeao=103&rota=MIDDLE` devolve as 5 páginas mais usadas dos dois patches mais novos. `GET /` mostra o andamento da coleta.
+- `servidor/`: Cloudflare Worker + D1. A cada minuto lê algumas partidas ranqueadas Solo/Duo do BR de Esmeralda para cima na API da Riot e soma jogos e vitórias por página de runas (campeão + rota + patch). `GET /runas?campeao=103&rota=MIDDLE` devolve as 5 páginas mais usadas dos dois patches mais novos, os monos (8+ jogos com o campeão e metade das partidas do jogador, ordenados por elo) e os pros que jogam com ele. `GET /` mostra o andamento da coleta.
+- `servidor/src/pros.js`: lista de pro players (Riot ID e time). A Riot não diz quem é pro, então a lista é mantida à mão; depois de um push o servidor acha cada conta e acompanha as partidas dela.
 
 A automação do GitHub (`.github/workflows/build.yml`) compila o .exe, roda os testes e publica o .exe na release `ultima` a cada push na `main`.
 
@@ -33,7 +34,7 @@ A automação do GitHub (`.github/workflows/build.yml`) compila o .exe, roda os 
 5. Abra o endereço do Worker (`https://lolautopick.<seu-subdominio>.workers.dev`): deve mostrar `partidas_lidas` subindo a cada minuto e `erro: null`.
 6. No AutoPick, abra **Runas → um campeão** e cole esse endereço no painel "Mais usadas no BR".
 
-Com a chave pessoal (100 pedidos a cada 2 min) o coletor lê ~7 mil partidas por dia. No plano pago do Workers dá para subir `PARTIDAS_POR_RODADA` em `wrangler.toml`.
+Com a chave pessoal (100 pedidos a cada 2 min) o coletor lê ~5,7 mil partidas por dia (4 por minuto), gravando ~80 mil linhas no D1, abaixo do limite de 100 mil por dia do plano grátis. No plano pago dá para subir `PARTIDAS_POR_RODADA` em `wrangler.toml`.
 
 ## Testes
 

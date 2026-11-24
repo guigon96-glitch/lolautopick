@@ -2,7 +2,8 @@ name = "lolautopick"
 main = "src/index.js"
 compatibility_date = "2025-06-01"
 
-# Uma rodada por minuto: ~6 pedidos à Riot (cabe no limite da chave pessoal).
+# Uma rodada por minuto: ~6 pedidos à Riot (cabe no limite da chave pessoal) e ~55 linhas gravadas no D1
+# (cabe nas 100 mil por dia do plano grátis). No plano pago dá para subir PARTIDAS_POR_RODADA.
 [triggers]
 crons = ["* * * * *"]
 
@@ -12,4 +13,4 @@ database_name = "autopick-runas"
 database_id = "3781a376-c50c-4714-ab03-da43a1c50c89"
 
 [vars]
-PARTIDAS_POR_RODADA = "5"
+PARTIDAS_POR_RODADA = "4"
