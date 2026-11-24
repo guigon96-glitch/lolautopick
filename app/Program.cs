@@ -298,17 +298,18 @@ class Cartao : Animado
 
 class Vaga : Animado
 {
-    public int Numero; public string Id, Nome; Image icone, runa; public Color Cor = Cores.Azul; float pop; bool sobreRuna;
+    public int Numero; public string Id, Nome; Image icone, arvorePrim, arvoreSec; public Color Cor = Cores.Azul; float pop; bool sobreRuna;
     public Vaga(int n) { Numero = n; Size = new Size(68, 68); Margin = new Padding(4); Font = new Font("Segoe UI", 16f, FontStyle.Bold); }
-    // runa = pedra angular das runas salvas do campeão (null: mostra o símbolo genérico)
-    public void Definir(string id, string nome, Image ic, Color cor, Image pedraAngular)
+    // ícones das árvores principal e secundária das runas salvas do campeão (null: mostra o símbolo genérico)
+    public void Definir(string id, string nome, Image ic, Color cor, Image prim, Image sec)
     {
         if (id != null && id != Id) pop = 1;
-        Id = id; Nome = nome; icone = ic; Cor = cor; runa = pedraAngular; Animar();
+        Id = id; Nome = nome; icone = ic; Cor = cor; arvorePrim = prim; arvoreSec = sec; Animar();
     }
-    // botão de runas no canto inferior direito: abre o editor de runas do campeão
+    // botão de runas no canto inferior direito (árvore principal + secundária): abre o editor de runas do campeão
     RectangleF AreaRuna { get { return new RectangleF(Width - 27, Height - 27, 26, 26); } }
-    public bool NaRuna(Point p) { return Id != null && AreaRuna.Contains(p); }
+    RectangleF AreaSec { get { return new RectangleF(Width - 41, Height - 21, 19, 19); } }
+    public bool NaRuna(Point p) { return Id != null && (AreaRuna.Contains(p) || (arvorePrim != null && AreaSec.Contains(p))); }
     protected override void OnMouseMove(MouseEventArgs e) { var s = NaRuna(e.Location); if (s != sobreRuna) { sobreRuna = s; Invalidate(); } base.OnMouseMove(e); }
     protected override void OnMouseLeave(EventArgs e) { sobreRuna = false; base.OnMouseLeave(e); }
     protected override bool Passo() { return base.Passo() | Aproxima(ref pop, 0); }
@@ -335,8 +336,17 @@ class Vaga : Animado
                 g.DrawString(sobreRuna ? "Runas" : "Tirar", f, b, new RectangleF(ir.X, ir.Y, ir.Width, ir.Height - 14), Cores.Centro);
         }
         var ar = AreaRuna;
-        using (var b = new SolidBrush(runa != null ? Cores.Fundo : Cores.Roxo)) g.FillEllipse(b, ar);
-        if (runa != null) Imagem(g, runa, new RectangleF(ar.X + 2, ar.Y + 2, ar.Width - 4, ar.Height - 4), ar.Width, 1f);
+        var anel = new Pen(sobreRuna ? Cores.Ouro : Cores.Roxo, sobreRuna ? 2.5f : 1.5f);
+        if (arvorePrim != null && arvoreSec != null)
+        {
+            // secundária menor, atrás e à esquerda da principal
+            var sr = AreaSec;
+            using (var b = new SolidBrush(Cores.Fundo)) g.FillEllipse(b, sr);
+            Imagem(g, arvoreSec, new RectangleF(sr.X + 2, sr.Y + 2, sr.Width - 4, sr.Height - 4), sr.Width, 1f);
+            g.DrawEllipse(anel, sr);
+        }
+        using (var b = new SolidBrush(arvorePrim != null ? Cores.Fundo : Cores.Roxo)) g.FillEllipse(b, ar);
+        if (arvorePrim != null) Imagem(g, arvorePrim, new RectangleF(ar.X + 2, ar.Y + 2, ar.Width - 4, ar.Height - 4), ar.Width, 1f);
         else
         {
             // símbolo de runa: losango com um traço no meio
@@ -347,7 +357,7 @@ class Vaga : Animado
                 g.DrawLine(pen, cx, cy - t + 3, cx, cy + t - 3);
             }
         }
-        using (var pen = new Pen(sobreRuna ? Cores.Ouro : Cores.Roxo, sobreRuna ? 2.5f : 1.5f)) g.DrawEllipse(pen, ar);
+        g.DrawEllipse(anel, ar); anel.Dispose();
         var c = new RectangleF(0, 0, 20, 20);
         using (var b = new SolidBrush(Cor)) g.FillEllipse(b, c);
         using (var f = new Font("Segoe UI", 8f, FontStyle.Bold)) using (var b = new SolidBrush(Cores.Fundo)) g.DrawString(Numero.ToString(), f, b, c, Cores.Centro);
@@ -1006,7 +1016,7 @@ class Janela : Form
         CarregarConfig();
         chipAceitar.Selecionado = aceitar; chipRunas.Selecionado = runas;
         MudarTipo("picks"); MudarAlvo("");
-        DadosRunas.Mudou += Desenhar; // ícone da pedra angular nas vagas aparece quando as runas terminam de baixar
+        DadosRunas.Mudou += Desenhar; // ícones das árvores nas vagas aparece quando as runas terminam de baixar
         faixa.Mostrar("Bem-vindo ao AutoPick!", "Escolha a lista em cima e clique nos campeões na ordem de prioridade. Salva sozinho.", Cores.Ouro, false);
 
         Shown += (o, e) =>
@@ -1106,9 +1116,14 @@ class Janela : Form
         {
             string id = i < l.Count ? l[i] : null; Image img = null;
             if (id != null) icones.TryGetValue(id, out img);
-            Image pedra = null; Pagina pg;
-            if (id != null && runasCamp.TryGetValue(id, out pg)) { var k = DadosRunas.Achar(pg.Perks[0]); if (k != null) DadosRunas.Imagens.TryGetValue(k.Icone, out pedra); }
-            vagas[i].Definir(id, id == null ? null : NomeDe(id), img, cor, pedra);
+            Image prim = null, sec = null; Pagina pg;
+            if (id != null && runasCamp.TryGetValue(id, out pg))
+            {
+                var ep = DadosRunas.EstiloDe(pg.Primaria); var es = DadosRunas.EstiloDe(pg.Secundaria);
+                if (ep != null) DadosRunas.Imagens.TryGetValue(ep.Icone, out prim);
+                if (es != null) DadosRunas.Imagens.TryGetValue(es.Icone, out sec);
+            }
+            vagas[i].Definir(id, id == null ? null : NomeDe(id), img, cor, prim, sec);
         }
         foreach (var c in cartoes)
         {
