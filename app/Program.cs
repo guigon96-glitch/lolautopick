@@ -671,7 +671,7 @@ class Janela : Form
         new[] { "Tank", "Tanque" }, new[] { "Marksman", "Atirador" }, new[] { "Support", "Suporte" } };
 
     readonly object trava = new object();
-    string pastaLol = "C:/Riot Games/League of Legends", servidorRunas = "";
+    string pastaLol = "C:/Riot Games/League of Legends", servidorRunas = "https://lolautopick.gui-gon96.workers.dev";
     bool aceitar = true, runas = true;
     Dictionary<string, List<string>> picks = Posicoes.ToDictionary(p => p[0], p => new List<string>());
     Dictionary<string, List<string>> bans = Posicoes.ToDictionary(p => p[0], p => new List<string>());
@@ -849,7 +849,7 @@ class Janela : Form
         var d = J.D(J.Ler(File.ReadAllText(ArqCfg)));
         if (d == null) { Log("config.json com erro: usando listas vazias. Ao mudar algo o arquivo é regravado."); return; }
         if (J.S(J.G(d, "pastaLol")) != "") pastaLol = J.S(J.G(d, "pastaLol"));
-        servidorRunas = J.S(J.G(d, "servidorRunas"));
+        if (J.S(J.G(d, "servidorRunas")) != "") servidorRunas = J.S(J.G(d, "servidorRunas"));
         if (J.G(d, "aceitar") is bool) aceitar = (bool)J.G(d, "aceitar");
         if (J.G(d, "runas") is bool) runas = (bool)J.G(d, "runas");
         Func<object, List<string>> lista = o => J.A(o).Select(J.S).Where(x => x != "").Take(5).ToList();
