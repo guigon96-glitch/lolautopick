@@ -103,15 +103,26 @@ static class Regras
 
     // Feitiços da rota (2 escolhidos) ou, se não tiver, os de Qualquer. Usando os de Qualquer fora da selva,
     // Smite (11) vira Ignite (14), ou Teleporte (12) se já tiver Ignite. null = nada configurado.
-    public static int[] FeiticosPara(Dictionary<string, List<int>> f, string pos)
+    public static int[] FeiticosPara(Dictionary<string, List<int>> f, string pos, bool flashNoF)
     {
         List<int> l;
-        if (!string.IsNullOrEmpty(pos) && f.TryGetValue(pos, out l) && l.Count == 2 && l.All(x => x > 0)) return l.ToArray();
-        if (!f.TryGetValue("", out l) || l.Count != 2 || !l.All(x => x > 0)) return null;
-        var r = l.ToArray();
-        if (!string.IsNullOrEmpty(pos) && pos != "jungle")
-            for (int i = 0; i < 2; i++) if (r[i] == 11) r[i] = r[1 - i] == 14 ? 12 : 14;
+        int[] r = null;
+        if (!string.IsNullOrEmpty(pos) && f.TryGetValue(pos, out l) && l.Count == 2 && l.All(x => x > 0)) r = l.ToArray();
+        else if (f.TryGetValue("", out l) && l.Count == 2 && l.All(x => x > 0))
+        {
+            r = l.ToArray();
+            if (!string.IsNullOrEmpty(pos) && pos != "jungle")
+                for (int i = 0; i < 2; i++) if (r[i] == 11) r[i] = r[1 - i] == 14 ? 12 : 14;
+        }
+        if (r != null) { var lr = r.ToList(); OrdenarFlash(lr, flashNoF); r = lr.ToArray(); }
         return r;
+    }
+
+    // Flash (4) no lado preferido: D = primeiro feitiço, F = segundo.
+    public static void OrdenarFlash(List<int> l, bool flashNoF)
+    {
+        if (l.Count != 2 || !l.Contains(4)) return;
+        if ((flashNoF && l[0] == 4) || (!flashNoF && l[1] == 4)) { var t = l[0]; l[0] = l[1]; l[1] = t; }
     }
 
     // Picks da posição sorteada primeiro, depois a lista reserva ("") sem repetir.
@@ -484,10 +495,11 @@ class Dica : Form
     Image img; string titulo, sub, texto;
     static readonly Font FTitulo = new Font("Segoe UI", 11f, FontStyle.Bold), FSub = new Font("Segoe UI", 8.5f, FontStyle.Bold), FTexto = new Font("Segoe UI", 9f);
     const int Larg = 340, Marg = 14, TamIcone = 46;
-    Dica() { FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; StartPosition = FormStartPosition.Manual; TopMost = true; BackColor = Cores.Fundo; DoubleBuffered = true; }
+    Dica() { FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; StartPosition = FormStartPosition.Manual; BackColor = Cores.Fundo; DoubleBuffered = true; }
     protected override bool ShowWithoutActivation { get { return true; } }
-    // WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, e sombra (CS_DROPSHADOW)
-    protected override CreateParams CreateParams { get { var cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x80; cp.ClassStyle |= 0x20000; return cp; } }
+    // WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST, e sombra (CS_DROPSHADOW). TopMost = true ativaria a janela
+    // (o Windows tira o foco da janela de baixo e a lista de feitiços fechava sozinha).
+    protected override CreateParams CreateParams { get { var cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x80 | 0x8; cp.ClassStyle |= 0x20000; return cp; } }
 
     // Calcula as alturas do mesmo jeito que o OnPaint desenha.
     float Medir(Graphics g, out float yTexto)
@@ -943,13 +955,14 @@ class Janela : Form
 
     readonly object trava = new object();
     string pastaLol = "C:/Riot Games/League of Legends", servidorRunas = "https://lolautopick.gui-gon96.workers.dev";
-    bool aceitar = true, runas = true;
+    bool aceitar = true, runas = true, flashNoF;
     Dictionary<string, List<string>> picks = Posicoes.ToDictionary(p => p[0], p => new List<string>());
     Dictionary<string, List<string>> bans = Posicoes.ToDictionary(p => p[0], p => new List<string>());
     Dictionary<string, Pagina> runasCamp = new Dictionary<string, Pagina>(); // id do Data Dragon → página salva
     Dictionary<string, List<int>> feiticos = Posicoes.ToDictionary(p => p[0], p => new List<int>()); // rota → [D, F]
     readonly BotaoRuna[] slotsFeitico = new BotaoRuna[2];
     Label rotuloFeiticos;
+    Chip chipFlash;
     Dictionary<int, string> ddPorKey = new Dictionary<int, string>();
     volatile Lcu conAtual; volatile string posAtual = "";
     Dictionary<string, int> idsLcu = new Dictionary<string, int>();
@@ -1019,6 +1032,13 @@ class Janela : Form
             b.MouseLeave += (o, e) => Dica.Esconder();
             linha2.Controls.Add(b);
         }
+        chipFlash = new Chip("Flash no D", Cores.Ouro) { Margin = new Padding(6, 22, 3, 3) };
+        chipFlash.Click += (o, e) =>
+        {
+            lock (trava) { flashNoF = !flashNoF; foreach (var l in feiticos.Values) Regras.OrdenarFlash(l, flashNoF); }
+            Salvar(); Desenhar();
+        };
+        linha2.Controls.Add(chipFlash);
         var linha3 = Linha();
         chipAceitar = new Chip("Aceitar partida", Cores.Verde); chipRunas = new Chip("Runas automáticas", Cores.Roxo);
         chipAceitar.Click += (o, e) => { lock (trava) aceitar = !aceitar; chipAceitar.Selecionado = aceitar; Salvar(); };
@@ -1091,6 +1111,7 @@ class Janela : Form
                     while (l.Count < 2) l.Add(0);
                     if (l[1 - n] == fe.Id) l[1 - n] = l[n];
                     l[n] = fe.Id;
+                    if (l.All(x => x > 0)) Regras.OrdenarFlash(l, flashNoF);
                 }
                 Salvar(); Desenhar(); menu.Close();
             };
@@ -1100,7 +1121,8 @@ class Janela : Form
         menu.Size = new Size(colunas * 52 + 14, linhas * 52 + 14);
         var b0 = slotsFeitico[n].PointToScreen(new Point(0, slotsFeitico[n].Height + 4));
         menu.Location = new Point(Math.Min(b0.X, Screen.FromControl(this).WorkingArea.Right - menu.Width), b0.Y);
-        menu.Deactivate += (o, e) => { Dica.Esconder(); menu.Close(); };
+        // fecha quando clicar fora (se o foco sair com o mouse em cima da lista, foi o cartão de explicação: ignora)
+        menu.Deactivate += (o, e) => { if (menu.Bounds.Contains(Cursor.Position)) return; Dica.Esconder(); menu.Close(); };
         menu.Show(this);
     }
 
@@ -1162,7 +1184,7 @@ class Janela : Form
         foreach (var kv in chipsTipo) kv.Value.Selecionado = kv.Key == tipo;
         foreach (var v in vagas) v.Visible = tipo != "runas";
         foreach (var b in slotsFeitico) b.Visible = tipo != "runas";
-        rotuloFeiticos.Visible = tipo != "runas";
+        rotuloFeiticos.Visible = tipo != "runas"; chipFlash.Visible = tipo != "runas";
         foreach (var kv in chipsAlvo) kv.Value.Visible = tipo != "runas";
         rotuloRota.Visible = tipo != "runas";
         AtualizarDica(); Desenhar();
@@ -1182,6 +1204,7 @@ class Janela : Form
     void Desenhar()
     {
         List<string> l, lp, lb; List<int> lf; lock (trava) { lp = picks[alvo].ToList(); lb = bans[alvo].ToList(); lf = feiticos[alvo].ToList(); }
+        chipFlash.Text = "Flash no " + (flashNoF ? "F" : "D"); chipFlash.Invalidate();
         for (int i = 0; i < 2; i++)
         {
             var f = i < lf.Count ? DadosRunas.Feiticos.FirstOrDefault(x => x.Id == lf[i]) : null;
@@ -1246,6 +1269,7 @@ class Janela : Form
         if (J.S(J.G(d, "servidorRunas")) != "") servidorRunas = J.S(J.G(d, "servidorRunas"));
         if (J.G(d, "aceitar") is bool) aceitar = (bool)J.G(d, "aceitar");
         if (J.G(d, "runas") is bool) runas = (bool)J.G(d, "runas");
+        flashNoF = J.S(J.G(d, "flash")) == "F";
         Func<object, List<string>> lista = o => J.A(o).Select(J.S).Where(x => x != "").Take(5).ToList();
         var pk = J.G(d, "picks");
         if (pk is object[]) picks[""] = lista(pk); // config antigo: uma lista só
@@ -1265,7 +1289,7 @@ class Janela : Form
     void Salvar()
     {
         string json;
-        lock (trava) json = J.Escrever(new Dictionary<string, object> { { "pastaLol", pastaLol }, { "servidorRunas", servidorRunas }, { "aceitar", aceitar }, { "runas", runas }, { "picks", picks.ToDictionary(kv => Chave(kv.Key), kv => kv.Value) }, { "bans", bans.ToDictionary(kv => Chave(kv.Key), kv => kv.Value) },
+        lock (trava) json = J.Escrever(new Dictionary<string, object> { { "pastaLol", pastaLol }, { "servidorRunas", servidorRunas }, { "aceitar", aceitar }, { "runas", runas }, { "flash", flashNoF ? "F" : "D" }, { "picks", picks.ToDictionary(kv => Chave(kv.Key), kv => kv.Value) }, { "bans", bans.ToDictionary(kv => Chave(kv.Key), kv => kv.Value) },
             { "paginas", runasCamp.ToDictionary(kv => kv.Key, kv => (object)kv.Value.ParaJson()) },
             { "feiticos", feiticos.ToDictionary(kv => Chave(kv.Key), kv => kv.Value) } });
         try { File.WriteAllText(ArqCfg, json); } catch (Exception e) { Log("Não consegui salvar o config.json: " + e.Message); }
@@ -1429,7 +1453,7 @@ class Janela : Form
                 {
                     posVista = pos;
                     bool conhecida = Posicoes.Any(x => x[0] == pos);
-                    int[] fs; lock (trava) fs = Regras.FeiticosPara(feiticos, pos);
+                    int[] fs; lock (trava) fs = Regras.FeiticosPara(feiticos, pos, flashNoF);
                     if (fs != null)
                     {
                         int sf = con.Req("PATCH", "/lol-champ-select/v1/session/my-selection", J.Escrever(new Dictionary<string, object> { { "spell1Id", fs[0] }, { "spell2Id", fs[1] } }), out tx);
@@ -1710,10 +1734,12 @@ static class Programa
             Tuple.Create("tag estranha não atualiza", !Atualizador.MaisNova("ultima", "1.0.0") && Atualizador.MaisNova("1.0.1", "0.0.0")),
             Tuple.Create("descrição sem HTML", DadosRunas.Limpar("Dá <b>dano</b>&nbsp;extra.<br><br><br>Recarga: 10s") == "Dá dano\u00a0extra.\n\nRecarga: 10s"),
             Tuple.Create("sem filtro do cliente", Regras.Decidir(pick, new List<int> { 1, 2, 3 }, new List<int>(), null).Campeao == 3),
-            Tuple.Create("feitiços da rota", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4, 11 } }, { "jungle", new List<int> { 11, 4 } } }, "jungle")) == "11,4"),
-            Tuple.Create("Qualquer fora da selva: Smite vira Ignite", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4, 11 } } }, "top")) == "4,14"),
-            Tuple.Create("Smite com Ignite vira Teleporte", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 11, 14 } } }, "middle")) == "12,14"),
-            Tuple.Create("sem feitiços configurados", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4 } } }, "top") == null),
+            Tuple.Create("feitiços da rota", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4, 11 } }, { "jungle", new List<int> { 11, 4 } } }, "jungle", true)) == "11,4"),
+            Tuple.Create("Flash no D", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "jungle", new List<int> { 11, 4 } } }, "jungle", false)) == "4,11"),
+            Tuple.Create("Qualquer fora da selva: Smite vira Ignite", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4, 11 } } }, "top", false)) == "4,14"),
+            Tuple.Create("Flash no F com Smite trocado", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4, 11 } } }, "top", true)) == "14,4"),
+            Tuple.Create("Smite com Ignite vira Teleporte", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 11, 14 } } }, "middle", false)) == "12,14"),
+            Tuple.Create("sem feitiços configurados", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4 } } }, "top", false) == null),
             Tuple.Create("não age fora da vez", Regras.Decidir(fora, new List<int> { 3 }, new List<int>(), todos) == null),
             Tuple.Create("posição primeiro, depois reserva", string.Join(",", Regras.ListaPick(listas, "middle")) == "Ahri,Zed,Lux"),
             Tuple.Create("sem posição usa reserva", string.Join(",", Regras.ListaPick(listas, "")) == "Lux,Ahri"),
