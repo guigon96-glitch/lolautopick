@@ -1375,7 +1375,9 @@ class Janela : Form
 
                 List<int> lp, lb;
                 lock (trava) { lp = Converter(Regras.ListaPick(picks, pos), avisados); lb = Converter(Regras.ListaPick(bans, pos), avisados); }
-                var minha = acoes.FirstOrDefault(a => J.I(J.G(a, "actorCellId")) == eu && J.B(J.G(a, "isInProgress")) && !J.B(J.G(a, "completed")));
+                // No planejamento o cliente já marca o ban como "em andamento" e aceita concluir, mas não vale: só age na fase de bans e picks.
+                bool planejando = J.S(J.G(J.D(J.G(s, "timer")), "phase")) == "PLANNING";
+                var minha = planejando ? null : acoes.FirstOrDefault(a => J.I(J.G(a, "actorCellId")) == eu && J.B(J.G(a, "isInProgress")) && !J.B(J.G(a, "completed")));
                 bool ehBan = minha != null && J.S(J.G(minha, "type")) == "ban";
 
                 // Antes da sua vez: já marca o pick (o time vê) e troca se o marcado for banido ou pego.
@@ -1384,7 +1386,8 @@ class Janela : Form
                 {
                     if (meuPick == null) { if (!travou) Estado("Seleção de campeões", "Esperando. " + ondeEstou, Cores.Ouro, true); continue; }
                     // a lista de "disponíveis" do cliente deixou de fora campeões que o jogador tem; tenta direto e pula o que o cliente recusar
-                    int marcado = J.I(J.G(meuPick, "championId"));
+                    // antes da sua vez o cliente guarda a marcação como intenção do jogador, não na ação
+                    int marcado = J.I(J.G(meuPick, "championId")); if (marcado == 0) marcado = J.I(J.G(me, "championPickIntent"));
                     // se o cliente recusar marcar o melhor da lista, marca o próximo (até 3 por segundo); volta a tentar o melhor a cada segundo
                     var tentar = lp.Where(x => !falhas.Contains(x)).ToList();
                     for (int k = 0; k < 3; k++)
@@ -1396,7 +1399,7 @@ class Janela : Form
                         if (marcados.Add(J.I(J.G(meuPick, "id")) + ":" + h.Campeao)) Log("Não deu para marcar " + Nome(h.Campeao) + " (erro " + sm + " " + tx + "). Marco o próximo e tento de novo na sua vez.");
                         tentar.Remove(h.Campeao);
                     }
-                    Estado("Seleção de campeões", (marcado > 0 ? "Pick marcado: " + Nome(marcado) + ". Travo quando chegar a sua vez. " : "Esperando a sua vez. ") + ondeEstou, Cores.Ouro, true, false);
+                    Estado(planejando ? "Planejamento" : "Seleção de campeões", (marcado > 0 ? "Pick marcado: " + Nome(marcado) + ". Travo quando chegar a sua vez. " : "Esperando a sua vez. ") + ondeEstou, Cores.Ouro, true, false);
                     continue;
                 }
 

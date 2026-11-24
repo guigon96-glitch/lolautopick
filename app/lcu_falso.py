@@ -27,7 +27,7 @@ def avancar():
     for a in acoes:
         if a['completed']: continue
         if a['type'] == 'ban':
-            a['isInProgress'] = 6 <= t < 26
+            a['isInProgress'] = t < 26  # como no cliente de verdade: o ban já aparece "em andamento" no planejamento
             if t >= 26: a['completed'] = True  # quem não baniu, perdeu a vez
         elif a['actorCellId'] == 0:
             a['isInProgress'] = 26 <= t < 30
@@ -68,6 +68,10 @@ class H(BaseHTTPRequestHandler):
             if a['type'] == 'pick' and corpo.get('championId') in NAO_TEM:
                 log.append('%5.1fs PATCH recusado (nao tem) %s' % (time.time() - inicio, CAMPEOES[corpo['championId']]))
                 return self.responder({'httpStatus': 400, 'message': 'Invalid champion'}, 400)
+            if a['type'] == 'pick' and not a['isInProgress']:  # fora da vez: vira intenção do jogador, não muda a ação
+                time_aliado[a['actorCellId']]['championPickIntent'] = corpo.get('championId', 0)
+                log.append('%5.1fs PATCH intencao cel %d -> %s' % (time.time() - inicio, a['actorCellId'], CAMPEOES.get(corpo.get('championId'))))
+                self.send_response(204); self.end_headers(); return
             a['championId'] = corpo.get('championId', 0)
             log.append('%5.1fs PATCH %s %s cel %d -> %s' % (time.time() - inicio, a['type'], 'em andamento' if a['isInProgress'] else 'marcacao', a['actorCellId'], CAMPEOES.get(a['championId'])))
             self.send_response(204); self.end_headers()
@@ -77,6 +81,9 @@ class H(BaseHTTPRequestHandler):
             if self.path.endswith('/complete'):
                 aid = int(self.path.split('/')[-2]); a = next(x for x in acoes if x['id'] == aid)
                 if not a['isInProgress']: log.append('%5.1fs COMPLETE recusado (fora da vez) %s' % (time.time() - inicio, a['type'])); return self.responder({'message': 'fora da vez'}, 500)
+                if time.time() - inicio < 6:  # planejamento: o cliente responde OK mas o ban não vale
+                    log.append('%5.1fs COMPLETE no PLANEJAMENTO (ignorado) %s -> %s' % (time.time() - inicio, a['type'], CAMPEOES.get(a['championId']))); a['championId'] = 0
+                    self.send_response(204); self.end_headers(); return
                 a['completed'] = True; a['isInProgress'] = False
                 log.append('%5.1fs COMPLETE %s -> %s' % (time.time() - inicio, a['type'], CAMPEOES.get(a['championId'])))
                 self.send_response(204); self.end_headers(); return
