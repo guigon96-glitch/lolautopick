@@ -1292,7 +1292,7 @@ class Janela : Form
 
     void Laco()
     {
-        Lcu con = null; int runasPara = 0; string posVista = null, ultimoErro = null, faseVista = null;
+        Lcu con = null; int runasPara = 0, marcadoPorMim = 0; string posVista = null, ultimoErro = null, faseVista = null;
         var falhas = new HashSet<int>(); var avisados = new HashSet<string>();
         var marcados = new HashSet<string>(); var inicioBan = new Dictionary<int, DateTime>();
         while (true)
@@ -1332,7 +1332,7 @@ class Janela : Form
                 }
                 if (fase != "ChampSelect")
                 {
-                    falhas.Clear(); marcados.Clear(); inicioBan.Clear(); runasPara = 0; posVista = null; faseVista = null;
+                    falhas.Clear(); marcados.Clear(); inicioBan.Clear(); runasPara = 0; posVista = null; faseVista = null; marcadoPorMim = 0;
                     Estado(TextoFase(fase), fase == "Matchmaking" ? "Assim que achar, eu aceito." : "", fase == "Matchmaking" ? Cores.Azul : fase == "InProgress" ? Cores.Verde : Cores.Sutil, fase == "Matchmaking");
                     continue;
                 }
@@ -1385,7 +1385,13 @@ class Janela : Form
                     Log("Fase da seleção: " + faseSel + " · suas ações: " + string.Join("; ", acoes.Where(a => J.I(J.G(a, "actorCellId")) == eu).Select(a =>
                         J.S(J.G(a, "type")) + " #" + J.I(J.G(a, "id")) + (J.B(J.G(a, "isInProgress")) ? " em andamento" : "") + (J.B(J.G(a, "completed")) ? " concluída" : "")
                         + (J.I(J.G(a, "championId")) > 0 ? " " + Nome(J.I(J.G(a, "championId"))) : ""))) + " · intenção: " + Nome(J.I(J.G(me, "championPickIntent"))));
-                    try { File.WriteAllText(Path.Combine(Pasta, "selecao-" + (faseSel == "" ? "sem-fase" : faseSel) + ".json"), tx); } catch { }
+                    // só o que importa para o pick/ban (sem nomes dos jogadores nem o token do chat da partida)
+                    var resumo = new Dictionary<string, object> {
+                        { "timer", J.G(s, "timer") }, { "localPlayerCellId", eu }, { "actions", J.G(s, "actions") }, { "bans", J.G(s, "bans") },
+                        { "hasSimultaneousBans", J.G(s, "hasSimultaneousBans") }, { "disallowBanningTeammateHoveredChampions", J.G(s, "disallowBanningTeammateHoveredChampions") },
+                        { "myTeam", J.A(J.G(s, "myTeam")).Select(J.D).Where(x => x != null).Select(x => new Dictionary<string, object> {
+                            { "cellId", J.G(x, "cellId") }, { "assignedPosition", J.G(x, "assignedPosition") }, { "championId", J.G(x, "championId") }, { "championPickIntent", J.G(x, "championPickIntent") } }).ToList() } };
+                    try { File.WriteAllText(Path.Combine(Pasta, "selecao-" + (faseSel == "" ? "sem-fase" : faseSel) + ".json"), J.Escrever(resumo)); } catch { }
                 }
                 var minha = planejando ? null : acoes.FirstOrDefault(a => J.I(J.G(a, "actorCellId")) == eu && J.B(J.G(a, "isInProgress")) && !J.B(J.G(a, "completed")));
                 bool ehBan = minha != null && J.S(J.G(minha, "type")) == "ban";
@@ -1398,14 +1404,15 @@ class Janela : Form
                     // a lista de "disponíveis" do cliente deixou de fora campeões que o jogador tem; tenta direto e pula o que o cliente recusar
                     // antes da sua vez o cliente guarda a marcação como intenção do jogador, não na ação
                     int marcado = J.I(J.G(meuPick, "championId")); if (marcado == 0) marcado = J.I(J.G(me, "championPickIntent"));
+                    // marca cada campeão uma vez só: se o cliente desfizer ou você trocar na mão, não briga; só muda se o marcado for banido/pego
                     // se o cliente recusar marcar o melhor da lista, marca o próximo (até 3 por segundo); volta a tentar o melhor a cada segundo
                     var tentar = lp.Where(x => !falhas.Contains(x)).ToList();
                     for (int k = 0; k < 3; k++)
                     {
                         var h = Regras.Decidir(s, tentar, lb, null, meuPick);
-                        if (h.Campeao == 0 || h.Campeao == marcado) break;
+                        if (h.Campeao == 0 || h.Campeao == marcado || h.Campeao == marcadoPorMim) break;
                         int sm = con.Req("PATCH", "/lol-champ-select/v1/session/actions/" + J.I(J.G(meuPick, "id")), J.Escrever(new Dictionary<string, object> { { "championId", h.Campeao } }), out tx);
-                        if (sm < 400) { marcado = h.Campeao; Log("Pick marcado: " + Nome(marcado)); break; }
+                        if (sm < 400) { marcado = marcadoPorMim = h.Campeao; Log("Pick marcado: " + Nome(marcado)); break; }
                         if (marcados.Add(J.I(J.G(meuPick, "id")) + ":" + h.Campeao)) Log("Não deu para marcar " + Nome(h.Campeao) + " (erro " + sm + " " + tx + "). Marco o próximo e tento de novo na sua vez.");
                         tentar.Remove(h.Campeao);
                     }
@@ -1417,7 +1424,7 @@ class Janela : Form
                 if (ehBan)
                 {
                     int idBan = J.I(J.G(minha, "id")); DateTime t0;
-                    if (!inicioBan.TryGetValue(idBan, out t0)) inicioBan[idBan] = t0 = DateTime.Now;
+                    if (!inicioBan.TryGetValue(idBan, out t0)) { inicioBan[idBan] = t0 = DateTime.Now; Log("Sua vez de banir: espero 5s para ver o que o time quer jogar."); }
                     int falta = 5 - (int)(DateTime.Now - t0).TotalSeconds;
                     if (falta > 0) { Estado("Sua vez de banir", "Esperando " + falta + "s para ver o que o time quer jogar...", Cores.Vermelho, true, false); continue; }
                 }
