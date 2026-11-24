@@ -20,7 +20,7 @@ Se o LoL não estiver em `C:\Riot Games\League of Legends`, ajuste `pastaLol` no
 ## Como funciona
 
 - `app/Program.cs`: o programa inteiro (WinForms). Fala com o cliente pela API local dele (LCU), usando o `lockfile` da pasta do LoL. Campeões, runas e ícones vêm do Data Dragon (público, sempre do patch atual).
-- `servidor/`: Cloudflare Worker + D1. A cada minuto lê algumas partidas ranqueadas Solo/Duo de Desafiante e Grão-Mestre do BR na API da Riot e soma jogos e vitórias por página de runas (campeão + rota + patch). `GET /runas?campeao=103&rota=MIDDLE` devolve as 3 páginas mais usadas dos dois patches mais novos. `GET /` mostra o andamento da coleta.
+- `servidor/`: Cloudflare Worker + D1. A cada minuto lê algumas partidas ranqueadas Solo/Duo do BR de Esmeralda para cima na API da Riot e soma jogos e vitórias por página de runas (campeão + rota + patch). `GET /runas?campeao=103&rota=MIDDLE` devolve as 3 páginas mais usadas dos dois patches mais novos. `GET /` mostra o andamento da coleta.
 
 A automação do GitHub (`.github/workflows/build.yml`) compila o .exe, roda os testes e publica o .exe na release `ultima` a cada push na `main`.
 

@@ -1,8 +1,11 @@
-// Coletor de runas do BR: lê partidas ranqueadas Solo/Duo de Desafiante e Grão-Mestre na API da Riot
+// Coletor de runas do BR: lê partidas ranqueadas Solo/Duo de Esmeralda para cima na API da Riot
 // e conta jogos e vitórias por página de runas (campeão + rota + patch). O AutoPick consulta GET /runas.
 const PLATAFORMA = 'https://br1.api.riotgames.com';
 const REGIAO = 'https://americas.api.riotgames.com'; // o BR fica na região "americas" da match-v5
 const FILA_SOLO = 420;
+// Fontes de jogadores (Esmeralda+): as 3 ligas do topo e as divisões paginadas de Diamante e Esmeralda.
+const LIGAS_TOPO = ['challengerleagues', 'grandmasterleagues', 'masterleagues'];
+const DIVISOES = ['DIAMOND', 'EMERALD'].flatMap(t => ['I', 'II', 'III', 'IV'].map(d => [t, d]));
 export const ROTAS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY'];
 
 const ESQUEMA = [
@@ -49,19 +52,25 @@ export async function coletar(env) {
   const db = env.DB, max = Number(env.PARTIDAS_POR_RODADA || 5);
   await criarEsquema(db);
   try {
-    // 1. Jogadores: Desafiante + Grão-Mestre do BR, renovado uma vez por dia.
-    const semente = Number(await db.prepare("SELECT valor FROM meta WHERE chave = 'semente'").first('valor') || 0);
-    if (Date.now() - semente > 864e5) {
-      let total = 0;
-      for (const liga of ['challengerleagues', 'grandmasterleagues']) {
-        const l = await riot(env, `${PLATAFORMA}/lol/league/v4/${liga}/by-queue/RANKED_SOLO_5x5`);
-        // shortcut: usa só o puuid que a league-v4 já devolve; se a Riot tirar o campo, precisa buscar pela summoner-v4
-        const puuids = (l.entries || []).map(e => e.puuid).filter(Boolean);
-        total += puuids.length;
-        for (const lote of pedacos(puuids, 50)) await db.batch(lote.map(p => db.prepare('INSERT OR IGNORE INTO jogadores (puuid) VALUES (?)').bind(p)));
+    // 1. Jogadores: um pedido por rodada, percorrendo LIGAS_TOPO e depois cada divisão página a página.
+    //    Terminado o ciclo, recomeça depois de um dia.
+    const semente = Number(await db.prepare("SELECT valor FROM meta WHERE chave = 'semente_esmeralda'").first('valor') || 0);
+    const passo = await db.prepare("SELECT valor FROM meta WHERE chave = 'semente_passo'").first('valor');
+    if (passo || Date.now() - semente > 864e5) {
+      let { i = 0, pagina = 1 } = passo ? JSON.parse(passo) : {}, entradas;
+      if (i < LIGAS_TOPO.length) { entradas = (await riot(env, `${PLATAFORMA}/lol/league/v4/${LIGAS_TOPO[i]}/by-queue/RANKED_SOLO_5x5`)).entries || []; i++; }
+      else {
+        const [tier, div] = DIVISOES[i - LIGAS_TOPO.length];
+        entradas = await riot(env, `${PLATAFORMA}/lol/league/v4/entries/RANKED_SOLO_5x5/${tier}/${div}?page=${pagina}`);
+        if (entradas.length) pagina++; else { i++; pagina = 1; }
       }
-      await guardar(db, 'semente', Date.now());
-      await guardar(db, 'jogadores_semente', total);
+      // shortcut: usa só o puuid que a league-v4 já devolve; se a Riot tirar o campo, precisa buscar pela summoner-v4
+      const puuids = entradas.map(e => e.puuid).filter(Boolean);
+      for (const lote of pedacos(puuids, 50)) await db.batch(lote.map(p => db.prepare('INSERT OR IGNORE INTO jogadores (puuid) VALUES (?)').bind(p)));
+      if (i >= LIGAS_TOPO.length + DIVISOES.length) {
+        await guardar(db, 'semente_esmeralda', Date.now());
+        await db.prepare("DELETE FROM meta WHERE chave = 'semente_passo'").run();
+      } else await guardar(db, 'semente_passo', JSON.stringify({ i, pagina }));
     }
     // 2. Fila acabando: pega as partidas recentes do jogador visto há mais tempo.
     if (await db.prepare('SELECT COUNT(*) AS n FROM fila').first('n') < max * 2) {
@@ -135,7 +144,9 @@ export default {
       return json({
         partidas_lidas: await um('SELECT COUNT(*) AS n FROM feitas'), na_fila: await um('SELECT COUNT(*) AS n FROM fila'),
         jogadores: await um('SELECT COUNT(*) AS n FROM jogadores'), patches: await patchesRecentes(db),
-        ultima_semente: meta.semente ? new Date(Number(meta.semente)).toISOString() : null, erro: meta.erro || null,
+        ultima_semente: meta.semente_esmeralda ? new Date(Number(meta.semente_esmeralda)).toISOString() : null,
+        buscando_jogadores: meta.semente_passo ? (([t, d]) => t ? `${t} ${d}` : 'Desafiante/Grão-Mestre/Mestre')(DIVISOES[JSON.parse(meta.semente_passo).i - LIGAS_TOPO.length] || []) : null,
+        erro: meta.erro || null,
       });
     }
     return json({ erro: 'não encontrado' }, 404);

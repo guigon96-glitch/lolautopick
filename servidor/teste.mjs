@@ -41,6 +41,9 @@ globalThis.fetch = async url => {
 respostas = [
   ['challengerleagues', { entries: [{ puuid: 'p1' }, { puuid: 'p2' }] }],
   ['grandmasterleagues', { entries: [{ puuid: 'p3' }, {}] }],
+  ['masterleagues', { entries: [{ puuid: 'p4' }] }],
+  ['/entries/RANKED_SOLO_5x5/EMERALD/IV?page=1', [{ puuid: 'p5' }, { puuid: 'p6' }]],
+  ['/entries/', []],
   ['/by-puuid/', ['BR1_1', 'BR1_2', 'BR1_3']],
   ['/matches/BR1_1', partida('BR1_1', true)],
   ['/matches/BR1_2', partida('BR1_2', true)],
@@ -48,8 +51,16 @@ respostas = [
 ];
 const env = { DB: d1(), RIOT_KEY: 'chave-falsa', PARTIDAS_POR_RODADA: '5' };
 await coletar(env);
+assert.strictEqual(await env.DB.prepare('SELECT COUNT(*) AS n FROM jogadores').first('n'), 2, 'um pedido de jogadores por rodada');
+// ciclo inteiro: 3 ligas do topo + 8 divisões (Esmeralda IV tem 1 página com gente)
+for (let i = 0; i < 11; i++) await coletar(env);
+assert.ok(pedidos.some(u => u.includes('/DIAMOND/I?page=1')) && pedidos.some(u => u.includes('/EMERALD/IV?page=2')), 'percorre Diamante e Esmeralda');
+assert.ok(!pedidos.some(u => u.includes('/GOLD/') || u.includes('/PLATINUM/')), 'nada abaixo de Esmeralda');
+assert.strictEqual(await env.DB.prepare("SELECT valor FROM meta WHERE chave = 'semente_passo'").first('valor'), null, 'ciclo terminou');
+pedidos.length = 0; await coletar(env);
+assert.ok(!pedidos.some(u => u.includes('league')), 'não recomeça no mesmo dia');
 assert.ok(pedidos.every(u => u.startsWith('https://br1.api.riotgames.com') || u.startsWith('https://americas.api.riotgames.com')));
-assert.strictEqual(await env.DB.prepare('SELECT COUNT(*) AS n FROM jogadores').first('n'), 3);
+assert.strictEqual(await env.DB.prepare('SELECT COUNT(*) AS n FROM jogadores').first('n'), 6);
 assert.strictEqual(await env.DB.prepare('SELECT COUNT(*) AS n FROM feitas').first('n'), 3);
 
 const r = await consultar(env.DB, 103, 'MIDDLE');

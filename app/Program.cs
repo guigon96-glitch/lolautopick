@@ -420,7 +420,7 @@ class RunasForm : Form
         area = new Panel { Location = new Point(0, 0), Size = new Size(770, 590) };
         var lado = new Panel { Location = new Point(780, 12), Size = new Size(306, 580), BackColor = Cores.Cartao };
         lado.Controls.Add(new Label { Text = "Mais usadas no BR", Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Cores.Ouro, Location = new Point(10, 8), AutoSize = true });
-        lado.Controls.Add(new Label { Text = (rota == "" ? "Todas as rotas" : Janela.NomePos(rota.ToLowerInvariant())) + " · Desafiante e Grão-Mestre", ForeColor = Cores.Sutil, Location = new Point(11, 30), AutoSize = true });
+        lado.Controls.Add(new Label { Text = (rota == "" ? "Todas as rotas" : Janela.NomePos(rota.ToLowerInvariant())) + " · Esmeralda+", ForeColor = Cores.Sutil, Location = new Point(11, 30), AutoSize = true });
         painelStats = new Panel { Location = new Point(0, 52), Size = new Size(306, 318) };
         lado.Controls.Add(painelStats);
         lado.Controls.Add(new Label { Text = "Recomendada pelo LoL", Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Cores.Ouro, Location = new Point(10, 378), AutoSize = true });
