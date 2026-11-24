@@ -30,7 +30,7 @@ A automação do GitHub (`.github/workflows/build.yml`) compila o .exe, roda os 
 2. **Banco D1**: no painel da Cloudflare, *Storage & Databases → D1 → Create*, nome `autopick-runas`. Copie o **Database ID** para `database_id` em `servidor/wrangler.toml`.
 3. **Worker**: *Workers & Pages → Create → Import a repository*, escolha este repositório e em **Root directory** ponha `servidor`.
 4. **Segredo**: no Worker, *Settings → Variables and Secrets → Add*, tipo **Secret**, nome `RIOT_KEY`, valor = sua chave.
-5. Abra o endereço do Worker (`https://autopick-runas.<seu-subdominio>.workers.dev`): deve mostrar `partidas_lidas` subindo a cada minuto e `erro: null`.
+5. Abra o endereço do Worker (`https://lolautopick.<seu-subdominio>.workers.dev`): deve mostrar `partidas_lidas` subindo a cada minuto e `erro: null`.
 6. No AutoPick, abra **Runas → um campeão** e cole esse endereço no painel "Mais usadas no BR".
 
 Com a chave pessoal (100 pedidos a cada 2 min) o coletor lê ~7 mil partidas por dia. No plano pago do Workers dá para subir `PARTIDAS_POR_RODADA` em `wrangler.toml`.
