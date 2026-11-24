@@ -84,6 +84,18 @@ await assert.rejects(coletar(env, PROS));
 const st = await (await worker.fetch(new Request('https://x/'), env)).json();
 assert.match(st.erro, /chave/);
 
+// trava do limite diário: conta as gravações e, ao chegar no limite, para sem pedir nada à Riot nem gravar
+assert.ok(st.gravadas_hoje > 100 && st.pausado_ate_00h_utc === false, 'conta as gravações do dia');
+env.LIMITE_ESCRITAS_DIA = '100';
+pedidos.length = 0;
+respostas = [];
+await coletar(env, PROS);
+assert.strictEqual(pedidos.length, 0, 'pausado: nenhum pedido');
+const pausado = await (await worker.fetch(new Request('https://x/'), env)).json();
+assert.strictEqual(pausado.pausado_ate_00h_utc, true);
+assert.strictEqual(pausado.gravadas_hoje, st.gravadas_hoje, 'pausado: nada gravado');
+delete env.LIMITE_ESCRITAS_DIA;
+
 // endpoint
 const resp = await worker.fetch(new Request('https://x/runas?campeao=103&rota=middle'), env);
 assert.strictEqual(resp.status, 200);

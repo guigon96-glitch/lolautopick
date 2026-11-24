@@ -14,3 +14,6 @@ database_id = "3781a376-c50c-4714-ab03-da43a1c50c89"
 
 [vars]
 PARTIDAS_POR_RODADA = "4"
+# Trava: ao gravar isto no dia (UTC), a coleta pausa até a meia-noite UTC. O plano grátis do D1 permite 100 mil.
+# No plano pago (50 milhões por mês) pode subir para ~1600000.
+LIMITE_ESCRITAS_DIA = "90000"

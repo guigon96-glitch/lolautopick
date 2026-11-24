@@ -67,6 +67,7 @@ async function resolverPro(env, db, meta, pros) {
   const [nome, tag = ''] = pro.riotId.split('#');
   try {
     const a = await riot(env, `${REGIAO}/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(nome)}/${encodeURIComponent(tag)}`);
+    meta.escritas++;
     await db.prepare('INSERT INTO perfis (puuid, nome, pro) VALUES (?, ?, ?) ON CONFLICT (puuid) DO UPDATE SET pro = excluded.pro, nome = excluded.nome')
       .bind(a.puuid, pro.riotId, pro.time || 'Pro').run();
   } catch (e) { if (fatal(e)) throw e; } // conta não existe: pula
@@ -109,8 +110,13 @@ export async function coletar(env, pros = PROS) {
   await criarEsquema(db);
   const linhaMeta = await db.prepare("SELECT valor FROM meta WHERE chave = 'estado'").first('valor');
   const meta = linhaMeta ? JSON.parse(linhaMeta) : {};
-  const gravarMeta = () => db.prepare("INSERT OR REPLACE INTO meta (chave, valor) VALUES ('estado', ?)").bind(JSON.stringify(meta));
+  // cada gravação soma em meta.escritas (o REPLACE do próprio meta conta como 2: apaga e insere)
+  const gravarMeta = () => { meta.escritas += 2; return db.prepare("INSERT OR REPLACE INTO meta (chave, valor) VALUES ('estado', ?)").bind(JSON.stringify(meta)); };
   meta.fila = meta.fila || [];
+  // Trava do limite diário do D1 (zera à meia-noite UTC, como o da Cloudflare): ao chegar nele, pausa sem gravar nada.
+  const hoje = new Date().toISOString().slice(0, 10);
+  if (meta.dia !== hoje) { meta.dia = hoje; meta.escritas = 0; }
+  if (meta.escritas >= Number(env.LIMITE_ESCRITAS_DIA || 90000)) return;
   try {
     await resolverPro(env, db, meta, pros);
     if (meta.fila.length < max) {
@@ -121,6 +127,7 @@ export async function coletar(env, pros = PROS) {
           ? await db.prepare(`SELECT id FROM feitas WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all() : { results: [] };
         const ja = new Set(vistas.map(r => r.id).concat(meta.fila.map(f => f.id)));
         meta.fila.push(...ids.filter(id => !ja.has(id)).map(id => ({ id, p: j.puuid })));
+        meta.escritas++;
         await db.batch([
           db.prepare('INSERT INTO perfis (puuid, tier, pdl, visto) VALUES (?, ?, ?, ?) ON CONFLICT (puuid) DO UPDATE SET tier = COALESCE(excluded.tier, tier), pdl = COALESCE(excluded.pdl, pdl), visto = excluded.visto')
             .bind(j.puuid, j.tier ?? null, j.pdl ?? null, Date.now()),
@@ -133,7 +140,7 @@ export async function coletar(env, pros = PROS) {
       try { linhas = linhasDaPartida(await riot(env, `${REGIAO}/lol/match/v5/matches/${encodeURIComponent(item.id)}`)); }
       catch (e) { if (fatal(e)) throw e; } // 404 e afins: descarta a partida
       meta.fila = meta.fila.filter(f => f !== item);
-      const ops = [gravarMeta()];
+      const ops = [];
       if (!(await db.prepare('SELECT 1 AS x FROM feitas WHERE id = ?').bind(item.id).first('x'))) {
         ops.push(db.prepare('INSERT INTO feitas (id) VALUES (?)').bind(item.id), ...linhas.map(l => db.prepare(
           'INSERT INTO runas (patch, campeao, rota, pagina, jogos, vitorias) VALUES (?, ?, ?, ?, 1, ?) ' +
@@ -146,6 +153,8 @@ export async function coletar(env, pros = PROS) {
             .bind(dele.campeao, item.p, dele.pagina, dele.vitoria),
           db.prepare('UPDATE perfis SET jogos = jogos + 1, nome = COALESCE(nome, ?) WHERE puuid = ?').bind(dele.nome, item.p));
       }
+      meta.escritas += ops.length;
+      ops.push(gravarMeta());
       await db.batch(ops);
     }
     meta.erro = null;
@@ -211,6 +220,9 @@ export default {
         jogadores_vistos: await um('SELECT COUNT(*) AS n FROM perfis WHERE visto > 0'),
         pros: `${await um('SELECT COUNT(*) AS n FROM perfis WHERE pro IS NOT NULL')} de ${PROS.length}`,
         patches: await patchesRecentes(db),
+        gravadas_hoje: meta.dia === new Date().toISOString().slice(0, 10) ? meta.escritas || 0 : 0,
+        limite_diario: Number(env.LIMITE_ESCRITAS_DIA || 90000),
+        pausado_ate_00h_utc: meta.dia === new Date().toISOString().slice(0, 10) && meta.escritas >= Number(env.LIMITE_ESCRITAS_DIA || 90000),
         buscando_em: !c ? null : c.i < LIGAS_TOPO.length ? ['Desafiante', 'Grão-Mestre', 'Mestre'][c.i] : DIVISOES[c.i - LIGAS_TOPO.length].join(' ') + ' página ' + c.pagina,
         erro: meta.erro || null,
       });
