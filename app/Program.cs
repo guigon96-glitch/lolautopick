@@ -1292,7 +1292,7 @@ class Janela : Form
 
     void Laco()
     {
-        Lcu con = null; int runasPara = 0; string posVista = null, ultimoErro = null;
+        Lcu con = null; int runasPara = 0; string posVista = null, ultimoErro = null, faseVista = null;
         var falhas = new HashSet<int>(); var avisados = new HashSet<string>();
         var marcados = new HashSet<string>(); var inicioBan = new Dictionary<int, DateTime>();
         while (true)
@@ -1332,7 +1332,7 @@ class Janela : Form
                 }
                 if (fase != "ChampSelect")
                 {
-                    falhas.Clear(); marcados.Clear(); inicioBan.Clear(); runasPara = 0; posVista = null;
+                    falhas.Clear(); marcados.Clear(); inicioBan.Clear(); runasPara = 0; posVista = null; faseVista = null;
                     Estado(TextoFase(fase), fase == "Matchmaking" ? "Assim que achar, eu aceito." : "", fase == "Matchmaking" ? Cores.Azul : fase == "InProgress" ? Cores.Verde : Cores.Sutil, fase == "Matchmaking");
                     continue;
                 }
@@ -1376,7 +1376,17 @@ class Janela : Form
                 List<int> lp, lb;
                 lock (trava) { lp = Converter(Regras.ListaPick(picks, pos), avisados); lb = Converter(Regras.ListaPick(bans, pos), avisados); }
                 // No planejamento o cliente já marca o ban como "em andamento" e aceita concluir, mas não vale: só age na fase de bans e picks.
-                bool planejando = J.S(J.G(J.D(J.G(s, "timer")), "phase")) == "PLANNING";
+                string faseSel = J.S(J.G(J.D(J.G(s, "timer")), "phase"));
+                bool planejando = faseSel == "PLANNING";
+                // Diagnóstico: a cada fase registra as suas ações e guarda o que o cliente mandou em selecao-<fase>.json.
+                if (faseSel != faseVista)
+                {
+                    faseVista = faseSel;
+                    Log("Fase da seleção: " + faseSel + " · suas ações: " + string.Join("; ", acoes.Where(a => J.I(J.G(a, "actorCellId")) == eu).Select(a =>
+                        J.S(J.G(a, "type")) + " #" + J.I(J.G(a, "id")) + (J.B(J.G(a, "isInProgress")) ? " em andamento" : "") + (J.B(J.G(a, "completed")) ? " concluída" : "")
+                        + (J.I(J.G(a, "championId")) > 0 ? " " + Nome(J.I(J.G(a, "championId"))) : ""))) + " · intenção: " + Nome(J.I(J.G(me, "championPickIntent"))));
+                    try { File.WriteAllText(Path.Combine(Pasta, "selecao-" + (faseSel == "" ? "sem-fase" : faseSel) + ".json"), tx); } catch { }
+                }
                 var minha = planejando ? null : acoes.FirstOrDefault(a => J.I(J.G(a, "actorCellId")) == eu && J.B(J.G(a, "isInProgress")) && !J.B(J.G(a, "completed")));
                 bool ehBan = minha != null && J.S(J.G(minha, "type")) == "ban";
 
