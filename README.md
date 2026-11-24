@@ -10,11 +10,15 @@ Programa para Windows que, junto com o cliente do League of Legends:
 
 ## Baixar
 
-Vá em **Releases → ultima**, baixe `AutoPickLoL.zip`, extraia e abra `AutoPickLoL.exe`.
+Baixe **AutoPickLoL-Setup.exe** na [última versão](https://github.com/guigon96-glitch/LOLAUTOPICK/releases/latest) e rode.
+Ele instala para o seu usuário (sem administrador) em `%LOCALAPPDATA%\Programs\AutoPickLoL`, cria atalhos no Menu Iniciar e na Área de Trabalho e aparece em *Adicionar ou remover programas*.
 O Windows pode avisar que o arquivo não é reconhecido (não é assinado): **Mais informações → Executar assim mesmo**.
 Precisa só do .NET Framework 4.x, que já vem no Windows 10/11.
 
-Ao lado do .exe ficam `config.json` (suas listas e runas), `autopick.log` (registro) e a pasta `icones`.
+**Atualizações**: ao abrir, o app verifica a última versão no GitHub. Se houver uma nova, aparece o botão **Atualizar para 1.0.N**: ele baixa o instalador, instala em silêncio na mesma pasta e reabre o app. Suas listas e runas continuam.
+
+Na pasta do app ficam `config.json` (suas listas e runas), `autopick.log` (registro) e a pasta `icones`. Ao desinstalar, o `config.json` é mantido.
+Já usava a versão sem instalador? Copie o seu `config.json` para a pasta do app instalado.
 Se o LoL não estiver em `C:\Riot Games\League of Legends`, ajuste `pastaLol` no `config.json`.
 
 ## Como funciona
@@ -23,7 +27,7 @@ Se o LoL não estiver em `C:\Riot Games\League of Legends`, ajuste `pastaLol` no
 - `servidor/`: Cloudflare Worker + D1. A cada minuto lê algumas partidas ranqueadas Solo/Duo do BR de Esmeralda para cima na API da Riot e soma jogos e vitórias por página de runas (campeão + rota + patch). `GET /runas?campeao=103&rota=MIDDLE` devolve as 5 páginas mais usadas dos dois patches mais novos, os monos (8+ jogos com o campeão e metade das partidas do jogador, ordenados por elo) e os pros que jogam com ele. `GET /` mostra o andamento da coleta.
 - `servidor/src/pros.js`: lista de pro players (Riot ID e time). A Riot não diz quem é pro, então a lista é mantida à mão; depois de um push o servidor acha cada conta e acompanha as partidas dela.
 
-A automação do GitHub (`.github/workflows/build.yml`) compila o .exe, roda os testes e publica o .exe na release `ultima` a cada push na `main`.
+A automação do GitHub (`.github/workflows/build.yml`), a cada push na `main`: numera a versão (1.0.<número do build>, gravada em `app/Versao.cs`), compila o .exe, roda os testes, gera o instalador (`instalador/autopick.nsi`, NSIS) e publica a release `v1.0.N` com `AutoPickLoL-Setup.exe` e `AutoPickLoL.zip`.
 
 ## Pôr o servidor no ar
 
@@ -39,7 +43,8 @@ Com a chave pessoal (100 pedidos a cada 2 min) o coletor lê ~5,7 mil partidas p
 ## Testes
 
 ```bash
-mcs -target:winexe -out:AutoPickLoL.exe -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll app/Program.cs && mono AutoPickLoL.exe --teste
+mcs -target:winexe -out:AutoPickLoL.exe -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll app/Program.cs app/Versao.cs && mono AutoPickLoL.exe --teste
+makensis -DVERSAO=1.0.0 instalador/autopick.nsi
 ```
 
 ```bash

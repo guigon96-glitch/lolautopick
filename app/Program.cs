@@ -13,6 +13,40 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
+// Procura versão nova nas releases do GitHub e instala pelo AutoPickLoL-Setup.exe (modo silencioso, mesma pasta).
+static class Atualizador
+{
+    const string Api = "https://api.github.com/repos/guigon96-glitch/LOLAUTOPICK/releases/latest";
+    const string Instalador = "AutoPickLoL-Setup.exe";
+
+    // (versão, link do instalador) se a última release for mais nova que esta; senão null.
+    public static Tuple<string, string> Verificar()
+    {
+        using (var w = new WebClient { Encoding = Encoding.UTF8 })
+        {
+            w.Headers["User-Agent"] = "AutoPickLoL"; // a API do GitHub recusa pedido sem User-Agent
+            var d = J.D(J.Ler(w.DownloadString(Api)));
+            var versao = J.S(J.G(d, "tag_name")).TrimStart('v');
+            var url = J.A(J.G(d, "assets")).Select(J.D).Where(a => J.S(J.G(a, "name")) == Instalador).Select(a => J.S(J.G(a, "browser_download_url"))).FirstOrDefault();
+            return url != null && MaisNova(versao, Versao.Atual) ? Tuple.Create(versao, url) : null;
+        }
+    }
+
+    public static bool MaisNova(string nova, string atual)
+    {
+        Version a, b;
+        return Version.TryParse(nova, out a) && Version.TryParse(atual, out b) && a > b;
+    }
+
+    // Baixa o instalador e roda em silêncio na pasta atual (mantém config.json); o instalador fecha e reabre o app.
+    public static void Instalar(string url, string pasta)
+    {
+        var arq = Path.Combine(Path.GetTempPath(), Instalador);
+        using (var w = new WebClient()) { w.Headers["User-Agent"] = "AutoPickLoL"; w.DownloadFile(url, arq); }
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(arq, "/S /D=" + pasta) { UseShellExecute = true });
+    }
+}
+
 static class J
 {
     static readonly JavaScriptSerializer js = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
@@ -779,14 +813,14 @@ class Janela : Form
     Faixa faixa;
     readonly Vaga[] vagas = new Vaga[5];
     readonly Dictionary<string, Chip> chipsTipo = new Dictionary<string, Chip>(), chipsAlvo = new Dictionary<string, Chip>(), chipsClasse = new Dictionary<string, Chip>();
-    Chip chipAceitar, chipRunas;
+    Chip chipAceitar, chipRunas, chipAtualizar;
     Label dica, rotuloRota;
     TextBox busca, log;
     PainelSuave grade;
 
     public Janela()
     {
-        Text = "AutoPick LoL"; BackColor = Cores.Fundo; ForeColor = Cores.Texto; Font = new Font("Segoe UI", 9f);
+        Text = "AutoPick LoL " + Versao.Atual; BackColor = Cores.Fundo; ForeColor = Cores.Texto; Font = new Font("Segoe UI", 9f);
         ClientSize = new Size(1180, 820); MinimumSize = new Size(1000, 600); StartPosition = FormStartPosition.CenterScreen;
         Opacity = 0; DoubleBuffered = true;
 
@@ -820,6 +854,8 @@ class Janela : Form
         chipAceitar.Click += (o, e) => { lock (trava) aceitar = !aceitar; chipAceitar.Selecionado = aceitar; Salvar(); };
         chipRunas.Click += (o, e) => { lock (trava) runas = !runas; chipRunas.Selecionado = runas; Salvar(); };
         linha3.Controls.Add(chipAceitar); linha3.Controls.Add(chipRunas);
+        chipAtualizar = new Chip("Atualizar", Cores.Ouro) { Visible = false, Selecionado = true };
+        linha3.Controls.Add(chipAtualizar);
         editor.Controls.Add(linha1); editor.Controls.Add(linha2); editor.Controls.Add(linha3);
 
         var filtros = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Padding = new Padding(14, 8, 14, 4), BackColor = Color.FromArgb(17, 22, 36) };
@@ -851,7 +887,32 @@ class Janela : Form
             fade.Start();
             new Thread(CarregarCampeoes) { IsBackground = true }.Start();
             new Thread(Laco) { IsBackground = true }.Start();
+            new Thread(ProcurarAtualizacao) { IsBackground = true }.Start();
         };
+    }
+
+    void ProcurarAtualizacao()
+    {
+        Tuple<string, string> nova;
+        try { nova = Atualizador.Verificar(); } catch { return; } // sem internet ou GitHub fora: tenta na próxima vez que abrir
+        if (nova == null) return;
+        Na(() =>
+        {
+            chipAtualizar.Text = "Atualizar para " + nova.Item1;
+            chipAtualizar.Size = new Size(TextRenderer.MeasureText(chipAtualizar.Text, chipAtualizar.Font).Width + 30, 32);
+            chipAtualizar.Visible = true;
+            faixa.Mostrar("Versão " + nova.Item1 + " disponível!", "Clique em \"Atualizar para " + nova.Item1 + "\". Suas listas e runas continuam.", Cores.Ouro, true);
+            chipAtualizar.Click += (o, e) =>
+            {
+                chipAtualizar.Enabled = false;
+                faixa.Mostrar("Baixando a versão " + nova.Item1 + "...", "O AutoPick fecha e abre de novo sozinho.", Cores.Ouro, true);
+                new Thread(() =>
+                {
+                    try { Atualizador.Instalar(nova.Item2, Pasta); Na(Close); }
+                    catch (Exception ex) { Na(() => { chipAtualizar.Enabled = true; faixa.Mostrar("Não consegui atualizar", ex.Message, Cores.Laranja, false); }); }
+                }) { IsBackground = true }.Start();
+            };
+        });
     }
 
     static FlowLayoutPanel Linha() { return new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 4) }; }
@@ -1349,6 +1410,8 @@ static class Programa
             Tuple.Create("secundária: mesma linha troca", string.Join(",", DadosRunas.Secundaria(DadosRunas.Secundaria(DadosRunas.Secundaria(new List<KeyValuePair<int, int>>(), 1, 10), 2, 20), 1, 11).Select(x => x.Value)) == "20,11"),
             Tuple.Create("página salva e lida", Pagina.De(J.Ler(J.Escrever(new Pagina { Primaria = 8100, Secundaria = 8200, Perks = new List<int> { 1, 2, 3, 4, 5, 6, 7, 8, 9 } }.ParaJson()))) != null),
             Tuple.Create("página incompleta é ignorada", Pagina.De(J.Ler("{\"primaria\":8100,\"secundaria\":8200,\"perks\":[1,2]}")) == null),
+            Tuple.Create("versão nova é detectada", Atualizador.MaisNova("1.0.10", "1.0.9") && !Atualizador.MaisNova("1.0.9", "1.0.10") && !Atualizador.MaisNova("1.0.9", "1.0.9")),
+            Tuple.Create("tag estranha não atualiza", !Atualizador.MaisNova("ultima", "1.0.0") && Atualizador.MaisNova("1.0.1", "0.0.0")),
             Tuple.Create("não age fora da vez", Regras.Decidir(fora, new List<int> { 3 }, new List<int>(), todos) == null),
             Tuple.Create("posição primeiro, depois reserva", string.Join(",", Regras.ListaPick(listas, "middle")) == "Ahri,Zed,Lux"),
             Tuple.Create("sem posição usa reserva", string.Join(",", Regras.ListaPick(listas, "")) == "Lux,Ahri"),

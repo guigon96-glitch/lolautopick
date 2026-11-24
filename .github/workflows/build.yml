@@ -1,4 +1,5 @@
-# Compila o AutoPickLoL.exe, roda os testes e publica o .exe na release "ultima".
+# Compila o AutoPickLoL.exe (versão 1.0.<número do build>), roda os testes, gera o instalador e publica uma release
+# por versão. O app procura atualização na release mais nova ("latest").
 name: build
 
 on:
@@ -13,26 +14,36 @@ permissions:
 jobs:
   app:
     runs-on: ubuntu-24.04
+    env:
+      VERSAO: 1.0.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
       - name: Instalar compilador C# (Mono)
-        run: sudo apt-get update -q && sudo apt-get install -y -q mono-mcs libmono-system-windows-forms4.0-cil libmono-system-web-extensions4.0-cil
+        run: sudo apt-get update -q && sudo apt-get install -y -q mono-mcs libmono-system-windows-forms4.0-cil libmono-system-web-extensions4.0-cil nsis
       - name: Compilar
-        run: mcs -target:winexe -optimize -out:AutoPickLoL.exe -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll app/Program.cs
+        run: |
+          echo "static class Versao { public const string Atual = \"$VERSAO\"; }" > app/Versao.cs
+          mcs -target:winexe -optimize -out:AutoPickLoL.exe -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll app/Program.cs app/Versao.cs
       - name: Testes
         run: mono AutoPickLoL.exe --teste
+      - name: Instalador
+        run: makensis -V2 -DVERSAO=$VERSAO instalador/autopick.nsi
       - uses: actions/upload-artifact@v4
         with:
           name: AutoPickLoL
-          path: AutoPickLoL.exe
-      - name: Publicar na release "ultima"
+          path: |
+            AutoPickLoL.exe
+            AutoPickLoL-Setup.exe
+      - name: Publicar a versão
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           zip AutoPickLoL.zip AutoPickLoL.exe
-          gh release view ultima >/dev/null 2>&1 || gh release create ultima --title "AutoPick LoL (última versão)" --notes "Baixe o AutoPickLoL.zip, extraia e abra o AutoPickLoL.exe."
-          gh release upload ultima AutoPickLoL.zip --clobber
+          gh release create "v$VERSAO" AutoPickLoL-Setup.exe AutoPickLoL.zip --target "$GITHUB_SHA" --latest \
+            --title "AutoPick LoL $VERSAO" \
+            --notes "Instale com **AutoPickLoL-Setup.exe**. Quem já tem o app instalado recebe esta versão pelo botão Atualizar. O AutoPickLoL.zip é a versão sem instalador."
+          gh release delete ultima --yes --cleanup-tag 2>/dev/null || true # release fixa da versão antiga
 
   servidor:
     runs-on: ubuntu-24.04
