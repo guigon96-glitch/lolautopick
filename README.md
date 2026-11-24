@@ -5,6 +5,7 @@ Programa para Windows que, junto com o cliente do League of Legends:
 - **aceita a partida** sozinho;
 - **marca o pick** assim que a seleção abre e **trava** na sua vez, pela lista da rota em que você caiu (5 por rota + lista "Qualquer" de reserva);
 - **bane** pela lista da rota, esperando 5 s para não banir o que um aliado quer jogar;
+- **põe os feitiços de invocador** da rota assim que a seleção abre (se a rota não tiver, usa os de "Qualquer"; fora da selva o Smite vira Ignite);
 - **cria a página de runas** do campeão travado: a sua (montada no editor, igual ao do cliente) ou a recomendada pelo LoL;
 - mostra no editor as **runas mais usadas no BR com % de vitória**, e as dos **monos** e **pros** de cada campeão, vindas do seu servidor (pasta `servidor/`).
 

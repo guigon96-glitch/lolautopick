@@ -63,7 +63,10 @@ class H(BaseHTTPRequestHandler):
     def do_PATCH(self):
         corpo = json.loads(self.rfile.read(int(self.headers['Content-Length'])) or b'{}')
         with trava:
-            avancar(); aid = int(self.path.rsplit('/', 1)[1]); a = next(x for x in acoes if x['id'] == aid)
+            avancar()
+            if self.path == '/lol-champ-select/v1/session/my-selection':
+                log.append('%5.1fs FEITICOS %s' % (time.time() - inicio, corpo)); self.send_response(204); self.end_headers(); return
+            aid = int(self.path.rsplit('/', 1)[1]); a = next(x for x in acoes if x['id'] == aid)
             if a['completed']: return self.responder({'message': 'acao ja completa'}, 500)
             if a['type'] == 'pick' and corpo.get('championId') in NAO_TEM:
                 log.append('%5.1fs PATCH recusado (nao tem) %s' % (time.time() - inicio, CAMPEOES[corpo['championId']]))
@@ -73,6 +76,13 @@ class H(BaseHTTPRequestHandler):
                 log.append('%5.1fs PATCH intencao cel %d -> %s' % (time.time() - inicio, a['actorCellId'], CAMPEOES.get(corpo.get('championId'))))
                 self.send_response(204); self.end_headers(); return
             a['championId'] = corpo.get('championId', 0)
+            if corpo.get('completed') and a['isInProgress']:
+                if time.time() - inicio < 6:  # planejamento: responde OK mas não vale
+                    log.append('%5.1fs PATCH completed no PLANEJAMENTO (ignorado)' % (time.time() - inicio)); a['championId'] = 0
+                else:
+                    a['completed'] = True; a['isInProgress'] = False
+                    log.append('%5.1fs CONCLUIDO %s -> %s' % (time.time() - inicio, a['type'], CAMPEOES.get(a['championId'])))
+                self.send_response(204); self.end_headers(); return
             log.append('%5.1fs PATCH %s %s cel %d -> %s' % (time.time() - inicio, a['type'], 'em andamento' if a['isInProgress'] else 'marcacao', a['actorCellId'], CAMPEOES.get(a['championId'])))
             self.send_response(204); self.end_headers()
     def do_POST(self):

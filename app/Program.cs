@@ -101,6 +101,19 @@ static class Regras
         return d;
     }
 
+    // Feitiços da rota (2 escolhidos) ou, se não tiver, os de Qualquer. Usando os de Qualquer fora da selva,
+    // Smite (11) vira Ignite (14), ou Teleporte (12) se já tiver Ignite. null = nada configurado.
+    public static int[] FeiticosPara(Dictionary<string, List<int>> f, string pos)
+    {
+        List<int> l;
+        if (!string.IsNullOrEmpty(pos) && f.TryGetValue(pos, out l) && l.Count == 2 && l.All(x => x > 0)) return l.ToArray();
+        if (!f.TryGetValue("", out l) || l.Count != 2 || !l.All(x => x > 0)) return null;
+        var r = l.ToArray();
+        if (!string.IsNullOrEmpty(pos) && pos != "jungle")
+            for (int i = 0; i < 2; i++) if (r[i] == 11) r[i] = r[1 - i] == 14 ? 12 : 14;
+        return r;
+    }
+
     // Picks da posição sorteada primeiro, depois a lista reserva ("") sem repetir.
     public static List<string> ListaPick(Dictionary<string, List<string>> picks, string pos)
     {
@@ -406,6 +419,8 @@ class Estilo { public int Id; public string Nome, Icone; public List<List<Runa>>
 class Fragmento { public int Id; public string Nome; }
 
 // Página de runas: 4 da principal, 2 da secundária, 3 fragmentos (mesma ordem que o cliente usa).
+class Feitico { public int Id; public string Nome, Desc, Icone; }
+
 class Pagina
 {
     public int Primaria, Secundaria; public List<int> Perks = new List<int>();
@@ -423,6 +438,8 @@ static class DadosRunas
 {
     // Árvores e runas vêm do Data Dragon (atualiza a cada patch). Fragmentos: padrão abaixo, trocados pelos do cliente quando conecta.
     public static List<Estilo> Estilos = new List<Estilo>();
+    public static List<Feitico> Feiticos = new List<Feitico>(); // feitiços de invocador do modo clássico (Data Dragon); ícones em Imagens["spell/…"]
+    public static string NomeFeitico(int id) { var f = Feiticos.FirstOrDefault(x => x.Id == id); return f != null ? f.Nome : id.ToString(); }
     public static List<List<Fragmento>> Fragmentos = new List<List<Fragmento>> {
         F(5008, "Força Adaptativa", 5005, "Velocidade de Ataque", 5007, "Aceleração de Habilidade"),
         F(5008, "Força Adaptativa", 5010, "Velocidade de Movimento", 5001, "Vida Escalável"),
@@ -930,6 +947,9 @@ class Janela : Form
     Dictionary<string, List<string>> picks = Posicoes.ToDictionary(p => p[0], p => new List<string>());
     Dictionary<string, List<string>> bans = Posicoes.ToDictionary(p => p[0], p => new List<string>());
     Dictionary<string, Pagina> runasCamp = new Dictionary<string, Pagina>(); // id do Data Dragon → página salva
+    Dictionary<string, List<int>> feiticos = Posicoes.ToDictionary(p => p[0], p => new List<int>()); // rota → [D, F]
+    readonly BotaoRuna[] slotsFeitico = new BotaoRuna[2];
+    Label rotuloFeiticos;
     Dictionary<int, string> ddPorKey = new Dictionary<int, string>();
     volatile Lcu conAtual; volatile string posAtual = "";
     Dictionary<string, int> idsLcu = new Dictionary<string, int>();
@@ -984,6 +1004,21 @@ class Janela : Form
         }
         dica = new Label { AutoSize = false, Size = new Size(470, 68), ForeColor = Cores.Sutil, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(14, 4, 4, 4), Font = new Font("Segoe UI", 9.5f) };
         linha2.Controls.Add(dica);
+        rotuloFeiticos = Rotulo("Feitiços:"); rotuloFeiticos.Margin = new Padding(3, 28, 3, 3); linha2.Controls.Add(rotuloFeiticos);
+        for (int i = 0; i < 2; i++)
+        {
+            int n = i; var b = slotsFeitico[i] = new BotaoRuna(null, 50) { Margin = new Padding(4, 12, 4, 4), TextoAlt = i == 0 ? "D" : "F" };
+            b.Click += (o, e) => EscolherFeitico(n);
+            b.MouseEnter += (o, e) =>
+            {
+                Feitico f; lock (trava) { var l = feiticos[alvo]; f = n < l.Count ? DadosRunas.Feiticos.FirstOrDefault(x => x.Id == l[n]) : null; }
+                Image im = null; if (f != null) DadosRunas.Imagens.TryGetValue(f.Icone, out im);
+                Dica.Mostrar(b, im, f != null ? f.Nome : "Feitiço " + (n == 0 ? "D" : "F"), "Feitiço de invocador · " + (alvo == "" ? "Qualquer rota" : NomePos(alvo)),
+                    (f != null ? f.Desc + "\n\n" : "") + "Clique para escolher." + (alvo == "" ? " Fora da selva, o Smite vira Ignite." : ""));
+            };
+            b.MouseLeave += (o, e) => Dica.Esconder();
+            linha2.Controls.Add(b);
+        }
         var linha3 = Linha();
         chipAceitar = new Chip("Aceitar partida", Cores.Verde); chipRunas = new Chip("Runas automáticas", Cores.Roxo);
         chipAceitar.Click += (o, e) => { lock (trava) aceitar = !aceitar; chipAceitar.Selecionado = aceitar; Salvar(); };
@@ -1035,6 +1070,40 @@ class Janela : Form
     bool verificando;
 
     // manual = clicou em "Verificar atualização": avisa também quando não tem nada novo ou quando falha.
+    // Lista de feitiços para o botão D (0) ou F (1) da rota atual; escolher um que já está no outro botão troca os dois.
+    void EscolherFeitico(int n)
+    {
+        if (DadosRunas.Feiticos.Count == 0) { faixa.Mostrar("Feitiços ainda carregando", "Espere alguns segundos e tente de novo.", Cores.Laranja, false); return; }
+        var menu = new Form { FormBorderStyle = FormBorderStyle.None, StartPosition = FormStartPosition.Manual, ShowInTaskbar = false, BackColor = Cores.Ouro, Padding = new Padding(1) };
+        var grade = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Cores.Cartao, Padding = new Padding(6) };
+        menu.Controls.Add(grade);
+        int atual; lock (trava) { var l = feiticos[alvo]; atual = n < l.Count ? l[n] : 0; }
+        foreach (var f in DadosRunas.Feiticos)
+        {
+            var fe = f; var b = new BotaoRuna(f.Icone, 46) { Margin = new Padding(3), TextoAlt = f.Nome };
+            b.Marcar(f.Id == atual, false);
+            Dica.Em(b, f.Icone, f.Nome, "Feitiço de invocador", f.Desc);
+            b.Click += (o, e) =>
+            {
+                lock (trava)
+                {
+                    var l = feiticos[alvo];
+                    while (l.Count < 2) l.Add(0);
+                    if (l[1 - n] == fe.Id) l[1 - n] = l[n];
+                    l[n] = fe.Id;
+                }
+                Salvar(); Desenhar(); menu.Close();
+            };
+            grade.Controls.Add(b);
+        }
+        int colunas = 5, linhas = (DadosRunas.Feiticos.Count + colunas - 1) / colunas;
+        menu.Size = new Size(colunas * 52 + 14, linhas * 52 + 14);
+        var b0 = slotsFeitico[n].PointToScreen(new Point(0, slotsFeitico[n].Height + 4));
+        menu.Location = new Point(Math.Min(b0.X, Screen.FromControl(this).WorkingArea.Right - menu.Width), b0.Y);
+        menu.Deactivate += (o, e) => { Dica.Esconder(); menu.Close(); };
+        menu.Show(this);
+    }
+
     void ProcurarAtualizacao(bool manual)
     {
         if (verificando) return;
@@ -1092,6 +1161,8 @@ class Janela : Form
         tipo = t;
         foreach (var kv in chipsTipo) kv.Value.Selecionado = kv.Key == tipo;
         foreach (var v in vagas) v.Visible = tipo != "runas";
+        foreach (var b in slotsFeitico) b.Visible = tipo != "runas";
+        rotuloFeiticos.Visible = tipo != "runas";
         foreach (var kv in chipsAlvo) kv.Value.Visible = tipo != "runas";
         rotuloRota.Visible = tipo != "runas";
         AtualizarDica(); Desenhar();
@@ -1110,7 +1181,13 @@ class Janela : Form
 
     void Desenhar()
     {
-        List<string> l, lp, lb; lock (trava) { lp = picks[alvo].ToList(); lb = bans[alvo].ToList(); }
+        List<string> l, lp, lb; List<int> lf; lock (trava) { lp = picks[alvo].ToList(); lb = bans[alvo].ToList(); lf = feiticos[alvo].ToList(); }
+        for (int i = 0; i < 2; i++)
+        {
+            var f = i < lf.Count ? DadosRunas.Feiticos.FirstOrDefault(x => x.Id == lf[i]) : null;
+            slotsFeitico[i].Icone = f != null ? f.Icone : null; slotsFeitico[i].TextoAlt = f != null ? f.Nome : (i == 0 ? "D" : "F");
+            slotsFeitico[i].Marcar(f != null, false);
+        }
         l = tipo == "bans" ? lb : lp;
         var cor = tipo == "bans" ? Cores.Vermelho : Cores.Azul;
         for (int i = 0; i < 5; i++)
@@ -1176,6 +1253,8 @@ class Janela : Form
         var bn = J.G(d, "bans");
         if (bn is object[]) bans[""] = lista(bn); // config antigo: uma lista só
         else foreach (var p in Posicoes) bans[p[0]] = lista(J.G(J.D(bn), Chave(p[0])) ?? J.G(J.D(bn), p[0]));
+        var fe = J.D(J.G(d, "feiticos"));
+        if (fe != null) foreach (var p in Posicoes) feiticos[p[0]] = J.A(J.G(fe, Chave(p[0]))).Select(J.I).Where(x => x > 0).Take(2).ToList();
         var pg = J.D(J.G(d, "paginas"));
         if (pg != null) foreach (var kv in pg) { var x = Pagina.De(kv.Value); if (x != null) runasCamp[kv.Key] = x; }
     }
@@ -1187,7 +1266,8 @@ class Janela : Form
     {
         string json;
         lock (trava) json = J.Escrever(new Dictionary<string, object> { { "pastaLol", pastaLol }, { "servidorRunas", servidorRunas }, { "aceitar", aceitar }, { "runas", runas }, { "picks", picks.ToDictionary(kv => Chave(kv.Key), kv => kv.Value) }, { "bans", bans.ToDictionary(kv => Chave(kv.Key), kv => kv.Value) },
-            { "paginas", runasCamp.ToDictionary(kv => kv.Key, kv => (object)kv.Value.ParaJson()) } });
+            { "paginas", runasCamp.ToDictionary(kv => kv.Key, kv => (object)kv.Value.ParaJson()) },
+            { "feiticos", feiticos.ToDictionary(kv => Chave(kv.Key), kv => kv.Value) } });
         try { File.WriteAllText(ArqCfg, json); } catch (Exception e) { Log("Não consegui salvar o config.json: " + e.Message); }
     }
 
@@ -1349,6 +1429,12 @@ class Janela : Form
                 {
                     posVista = pos;
                     bool conhecida = Posicoes.Any(x => x[0] == pos);
+                    int[] fs; lock (trava) fs = Regras.FeiticosPara(feiticos, pos);
+                    if (fs != null)
+                    {
+                        int sf = con.Req("PATCH", "/lol-champ-select/v1/session/my-selection", J.Escrever(new Dictionary<string, object> { { "spell1Id", fs[0] }, { "spell2Id", fs[1] } }), out tx);
+                        Log(sf < 400 ? "Feitiços: " + DadosRunas.NomeFeitico(fs[0]) + " + " + DadosRunas.NomeFeitico(fs[1]) : "O cliente recusou os feitiços (erro " + sf + ": " + tx + ")");
+                    }
                     Na(() => MudarAlvo(conhecida ? pos : ""));
                     Estado(pos == "" ? "Seleção de campeões" : "Você caiu de " + NomePos(pos) + "!",
                         pos == "" ? "Modo sem rota: usando picks e bans de Qualquer." : "Usando picks e bans de " + NomePos(pos) + " (se acabarem, Qualquer).", Cores.Azul, false);
@@ -1434,10 +1520,10 @@ class Janela : Form
                 string pulos = string.Join(", ", d.Pulados.Select(p => Nome(p.Key) + " (" + p.Value + ")"));
                 if (d.Campeao == 0) { Estado("Sua vez de " + verbo + ", mas ninguém da lista serve", pulos == "" ? "Lista vazia. " + ondeEstou : pulos, Cores.Laranja, true); continue; }
                 if (pulos != "") Log("Pulei: " + pulos);
-                // marca e depois confirma, em duas chamadas
+                // marca e conclui pelo próprio PATCH (completed: true), o jeito que o cliente aceita; o POST /complete separado não valia
                 string url = "/lol-champ-select/v1/session/actions/" + J.I(J.G(d.Acao, "id"));
-                int st = con.Req("PATCH", url, J.Escrever(new Dictionary<string, object> { { "championId", d.Campeao } }), out tx);
-                if (st < 400) st = con.Req("POST", url + "/complete", null, out tx);
+                int st = con.Req("PATCH", url, J.Escrever(new Dictionary<string, object> { { "championId", d.Campeao }, { "completed", false } }), out tx);
+                if (st < 400) { Thread.Sleep(200); st = con.Req("PATCH", url, J.Escrever(new Dictionary<string, object> { { "championId", d.Campeao }, { "completed", true } }), out tx); }
                 if (st >= 400) { falhas.Add(d.Campeao); Log("O cliente recusou " + verbo + " " + Nome(d.Campeao) + " (erro " + st + ": " + tx + "). Vou para o próximo da lista."); }
                 else if (d.Ban) Estado("Banido: " + Nome(d.Campeao), ondeEstou, Cores.Vermelho, false);
                 else Estado("Travado: " + Nome(d.Campeao) + "!", ondeEstou, Cores.Azul, false);
@@ -1519,15 +1605,24 @@ class Janela : Form
                 }).ToList()).ToList()
             }).ToList();
             Na(() => DadosRunas.Estilos = estilos);
+            string jf; using (var web = new WebClient { Encoding = Encoding.UTF8 }) jf = web.DownloadString("https://ddragon.leagueoflegends.com/cdn/" + versao + "/data/pt_BR/summoner.json");
+            var feits = J.D(J.G(J.D(J.Ler(jf)), "data")).Values.Select(J.D).Where(f => f != null && J.A(J.G(f, "modes")).Select(J.S).Contains("CLASSIC"))
+                .Select(f => new Feitico { Id = J.I(J.G(f, "key")), Nome = J.S(J.G(f, "name")), Desc = DadosRunas.Limpar(J.S(J.G(f, "description"))), Icone = "spell/" + J.S(J.G(J.D(J.G(f, "image")), "full")) })
+                .OrderBy(f => f.Nome).ToList();
+            Na(() => { DadosRunas.Feiticos = feits; Desenhar(); });
             var pasta = Path.Combine(Pasta, "icones", "runas"); Directory.CreateDirectory(pasta);
-            var caminhos = estilos.Select(e => e.Icone).Concat(estilos.SelectMany(e => e.Linhas).SelectMany(l => l).Select(r => r.Icone)).Where(c => c != "").Distinct().ToList();
+            var caminhos = estilos.Select(e => e.Icone).Concat(estilos.SelectMany(e => e.Linhas).SelectMany(l => l).Select(r => r.Icone)).Concat(feits.Select(f => f.Icone)).Where(c => c != "").Distinct().ToList();
             Parallel.ForEach(caminhos, new ParallelOptions { MaxDegreeOfParallelism = 6 }, c =>
             {
                 try
                 {
                     var arq = Path.Combine(pasta, c.Replace('/', '_'));
                     byte[] bytes = File.Exists(arq) ? File.ReadAllBytes(arq) : null;
-                    if (bytes == null) { using (var w = new WebClient()) bytes = w.DownloadData("https://ddragon.leagueoflegends.com/cdn/img/" + c); File.WriteAllBytes(arq, bytes); }
+                    if (bytes == null)
+                    {
+                        var url = c.StartsWith("spell/") ? "https://ddragon.leagueoflegends.com/cdn/" + versao + "/img/" + c : "https://ddragon.leagueoflegends.com/cdn/img/" + c;
+                        using (var w = new WebClient()) bytes = w.DownloadData(url); File.WriteAllBytes(arq, bytes);
+                    }
                     Image img; using (var ms = new MemoryStream(bytes)) using (var tmp = Image.FromStream(ms)) img = new Bitmap(tmp, 64, 64);
                     Na(() => { DadosRunas.Imagens[c] = img; DadosRunas.Avisar(); });
                 }
@@ -1615,6 +1710,10 @@ static class Programa
             Tuple.Create("tag estranha não atualiza", !Atualizador.MaisNova("ultima", "1.0.0") && Atualizador.MaisNova("1.0.1", "0.0.0")),
             Tuple.Create("descrição sem HTML", DadosRunas.Limpar("Dá <b>dano</b>&nbsp;extra.<br><br><br>Recarga: 10s") == "Dá dano\u00a0extra.\n\nRecarga: 10s"),
             Tuple.Create("sem filtro do cliente", Regras.Decidir(pick, new List<int> { 1, 2, 3 }, new List<int>(), null).Campeao == 3),
+            Tuple.Create("feitiços da rota", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4, 11 } }, { "jungle", new List<int> { 11, 4 } } }, "jungle")) == "11,4"),
+            Tuple.Create("Qualquer fora da selva: Smite vira Ignite", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4, 11 } } }, "top")) == "4,14"),
+            Tuple.Create("Smite com Ignite vira Teleporte", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 11, 14 } } }, "middle")) == "12,14"),
+            Tuple.Create("sem feitiços configurados", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4 } } }, "top") == null),
             Tuple.Create("não age fora da vez", Regras.Decidir(fora, new List<int> { 3 }, new List<int>(), todos) == null),
             Tuple.Create("posição primeiro, depois reserva", string.Join(",", Regras.ListaPick(listas, "middle")) == "Ahri,Zed,Lux"),
             Tuple.Create("sem posição usa reserva", string.Join(",", Regras.ListaPick(listas, "")) == "Lux,Ahri"),
