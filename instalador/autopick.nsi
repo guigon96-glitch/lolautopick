@@ -16,6 +16,8 @@ InstallDirRegKey HKCU "Software\AutoPickLoL" "Pasta"
 SetCompressor /SOLID lzma
 
 !include "MUI2.nsh"
+!define MUI_ICON "../app/icone.ico"
+!define MUI_UNICON "../app/icone.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\AutoPickLoL.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Abrir o AutoPick LoL"
 !insertmacro MUI_PAGE_WELCOME

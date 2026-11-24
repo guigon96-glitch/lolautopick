@@ -43,7 +43,7 @@ Com a chave pessoal (100 pedidos a cada 2 min) o coletor lê ~5,7 mil partidas p
 ## Testes
 
 ```bash
-mcs -target:winexe -out:AutoPickLoL.exe -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll app/Program.cs app/Versao.cs && mono AutoPickLoL.exe --teste
+mcs -target:winexe -win32icon:app/icone.ico -out:AutoPickLoL.exe -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll app/Program.cs app/Versao.cs && mono AutoPickLoL.exe --teste
 makensis -DVERSAO=1.0.0 instalador/autopick.nsi
 ```
 

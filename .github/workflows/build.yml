@@ -23,7 +23,7 @@ jobs:
       - name: Compilar
         run: |
           echo "static class Versao { public const string Atual = \"$VERSAO\"; }" > app/Versao.cs
-          mcs -target:winexe -optimize -out:AutoPickLoL.exe -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll app/Program.cs app/Versao.cs
+          mcs -target:winexe -optimize -win32icon:app/icone.ico -out:AutoPickLoL.exe -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll app/Program.cs app/Versao.cs
       - name: Testes
         run: mono AutoPickLoL.exe --teste
       - name: Instalador

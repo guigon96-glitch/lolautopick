@@ -200,7 +200,7 @@ abstract class Animado : Control
         p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
         p.CloseFigure(); return p;
     }
-    protected static void Imagem(Graphics g, Image img, RectangleF r, float raio, float alfa)
+    internal static void Imagem(Graphics g, Image img, RectangleF r, float raio, float alfa)
     {
         using (var p = Redondo(r, raio))
         {
@@ -402,6 +402,20 @@ static class DadosRunas
     public static void Avisar() { var m = Mudou; if (m != null) m(); }
     public static Estilo EstiloDe(int id) { return Estilos.FirstOrDefault(e => e.Id == id); }
     public static Runa Achar(int id) { return Estilos.SelectMany(e => e.Linhas).SelectMany(l => l).FirstOrDefault(r => r.Id == id); }
+    // Texto do Data Dragon vem com HTML (<br>, <b>, &nbsp;…): vira texto puro com quebras de linha.
+    public static string Limpar(string html)
+    {
+        var t = Regex.Replace(html ?? "", "<br ?/?>", "\n", RegexOptions.IgnoreCase);
+        t = WebUtility.HtmlDecode(Regex.Replace(t, "<[^>]+>", ""));
+        return Regex.Replace(t, "\n{3,}", "\n\n").Trim();
+    }
+    // "Dominação · Pedra angular" para a dica da runa
+    public static string Onde(int id)
+    {
+        foreach (var e in Estilos) for (int i = 0; i < e.Linhas.Count; i++) if (e.Linhas[i].Any(r => r.Id == id))
+                return e.Nome + " · " + (i == 0 ? "Pedra angular" : "Linha " + (i + 1));
+        return "";
+    }
     public static string NomeFragmento(int id) { var f = Fragmentos.SelectMany(x => x).FirstOrDefault(x => x.Id == id); return f != null ? f.Nome : id.ToString(); }
     // Secundária: no máximo 2 runas, de linhas diferentes; a mais antiga sai (igual ao cliente).
     public static List<KeyValuePair<int, int>> Secundaria(List<KeyValuePair<int, int>> sel, int linha, int runa)
@@ -410,6 +424,83 @@ static class DadosRunas
         r.Add(new KeyValuePair<int, int>(linha, runa));
         while (r.Count > 2) r.RemoveAt(0);
         return r;
+    }
+}
+
+// Cartão flutuante com a explicação (runas, árvores, páginas): ícone, nome em dourado, onde fica e a descrição.
+// Uma janela só, reaproveitada; não rouba o foco.
+class Dica : Form
+{
+    static Dica unica;
+    Image img; string titulo, sub, texto;
+    static readonly Font FTitulo = new Font("Segoe UI", 11f, FontStyle.Bold), FSub = new Font("Segoe UI", 8.5f, FontStyle.Bold), FTexto = new Font("Segoe UI", 9f);
+    const int Larg = 340, Marg = 14, TamIcone = 46;
+    Dica() { FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; StartPosition = FormStartPosition.Manual; TopMost = true; BackColor = Cores.Fundo; DoubleBuffered = true; }
+    protected override bool ShowWithoutActivation { get { return true; } }
+    // WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, e sombra (CS_DROPSHADOW)
+    protected override CreateParams CreateParams { get { var cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x80; cp.ClassStyle |= 0x20000; return cp; } }
+
+    // Calcula as alturas do mesmo jeito que o OnPaint desenha.
+    float Medir(Graphics g, out float yTexto)
+    {
+        int xt = img != null ? Marg + TamIcone + 12 : Marg, w = Larg - xt - Marg;
+        float y = Marg + g.MeasureString(titulo, FTitulo, w).Height + 2;
+        if (sub != "") y += g.MeasureString(sub, FSub, w).Height;
+        y = Math.Max(y, img != null ? Marg + TamIcone : 0) + 6;
+        yTexto = y + 9;
+        return texto == "" ? y + Marg - 6 : yTexto + g.MeasureString(texto, FTexto, Larg - 2 * Marg).Height + Marg;
+    }
+
+    public static void Mostrar(Control junto, Image img, string titulo, string sub, string texto)
+    {
+        if (unica == null || unica.IsDisposed) unica = new Dica();
+        var d = unica; d.img = img; d.titulo = titulo ?? ""; d.sub = sub ?? ""; d.texto = texto ?? "";
+        int alt; float yt; using (var g = d.CreateGraphics()) alt = (int)Math.Ceiling(d.Medir(g, out yt));
+        var r = junto.RectangleToScreen(junto.ClientRectangle);
+        var tela = Screen.FromControl(junto).WorkingArea;
+        int x = r.Right + 10; if (x + Larg > tela.Right) x = r.Left - Larg - 10;
+        int y = Math.Max(tela.Top, Math.Min(r.Top, tela.Bottom - alt));
+        d.Bounds = new Rectangle(x, y, Larg, alt);
+        using (var p = Animado.Redondo(new RectangleF(0, 0, Larg, alt), 12)) d.Region = new Region(p);
+        d.Invalidate();
+        if (!d.Visible) d.Show();
+    }
+    public static void Esconder() { if (unica != null && !unica.IsDisposed && unica.Visible) unica.Hide(); }
+
+    // Liga a dica a um controle; o ícone é buscado na hora (pode ter acabado de carregar).
+    public static void Em(Control c, string icone, string titulo, string sub, string texto)
+    {
+        c.MouseEnter += (o, e) => { Image im = null; if (icone != null) DadosRunas.Imagens.TryGetValue(icone, out im); Mostrar(c, im, titulo, sub, texto); };
+        c.MouseLeave += (o, e) => Esconder();
+        c.Disposed += (o, e) => Esconder(); // clicar numa runa remonta a tela e apaga o botão embaixo do mouse
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        using (var b = new System.Drawing.Drawing2D.LinearGradientBrush(ClientRectangle, Color.FromArgb(28, 38, 62), Cores.Fundo, 90f)) g.FillRectangle(b, ClientRectangle);
+        using (var p = Animado.Redondo(new RectangleF(1, 1, Width - 2.5f, Height - 2.5f), 12)) using (var pen = new Pen(Cores.Ouro, 1.5f)) g.DrawPath(pen, p);
+        float yTexto; Medir(g, out yTexto);
+        int xt = Marg;
+        if (img != null)
+        {
+            var ir = new RectangleF(Marg, Marg, TamIcone, TamIcone);
+            using (var b = new SolidBrush(Cores.Cartao)) g.FillEllipse(b, ir);
+            Animado.Imagem(g, img, new RectangleF(ir.X + 3, ir.Y + 3, ir.Width - 6, ir.Height - 6), TamIcone, 1f);
+            using (var pen = new Pen(Cores.Ouro, 1.5f)) g.DrawEllipse(pen, ir);
+            xt = Marg + TamIcone + 12;
+        }
+        int w = Width - xt - Marg; float y = Marg;
+        var tt = g.MeasureString(titulo, FTitulo, w);
+        using (var b = new SolidBrush(Cores.Ouro)) g.DrawString(titulo, FTitulo, b, new RectangleF(xt, y, w, tt.Height + 2));
+        y += tt.Height + 2;
+        if (sub != "") using (var b = new SolidBrush(Cores.Azul)) g.DrawString(sub, FSub, b, new RectangleF(xt, y, w, g.MeasureString(sub, FSub, w).Height + 2));
+        if (texto == "") return;
+        using (var pen = new Pen(Cores.Linha)) g.DrawLine(pen, Marg, yTexto - 6, Width - Marg, yTexto - 6);
+        using (var b = new SolidBrush(Color.FromArgb(220, 216, 204))) g.DrawString(texto, FTexto, b, new RectangleF(Marg, yTexto, Width - 2 * Marg, Height - yTexto));
     }
 }
 
@@ -488,7 +579,6 @@ class RunasForm : Form
     int prim, sec; int[] primSel = new int[4], frag = new int[3];
     List<KeyValuePair<int, int>> secSel = new List<KeyValuePair<int, int>>();
     readonly Panel area, painelStats; readonly Label recTexto, falta; readonly Button usarRec, salvar;
-    readonly ToolTip dica = new ToolTip { InitialDelay = 200 };
     readonly int key; readonly string rota; string servidor; readonly Action<string> salvarServidor;
     Pagina rec;
     // Abas do painel: Geral (páginas mais usadas), Monos e Pros. Cada item: página + título/subtítulo + total.
@@ -499,7 +589,7 @@ class RunasForm : Form
     public RunasForm(string nome, Pagina atual, Func<Pagina> buscar, int chaveCampeao, string rotaAtual, string servidorRunas, Action<string> guardarServidor)
     {
         buscarRec = buscar; key = chaveCampeao; rota = (rotaAtual ?? "").ToUpperInvariant(); servidor = servidorRunas ?? ""; salvarServidor = guardarServidor;
-        Text = "Runas de " + nome; BackColor = Cores.Fundo; ForeColor = Cores.Texto; Font = new Font("Segoe UI", 9f);
+        Icon = Programa.Icone; ShowIcon = Icon != null; Text = "Runas de " + nome; BackColor = Cores.Fundo; ForeColor = Cores.Texto; Font = new Font("Segoe UI", 9f);
         ClientSize = new Size(1100, 650); StartPosition = FormStartPosition.CenterParent; FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false; DoubleBuffered = true;
 
@@ -641,8 +731,8 @@ class RunasForm : Form
             var cartao = new CartaoPagina(pg, t.Item4, t.Item2, t.Item3) { Location = new Point(8, y) };
             cartao.Click += (o, e) => Carregar(pg);
             var ep = DadosRunas.EstiloDe(pg.Primaria); var es = DadosRunas.EstiloDe(pg.Secundaria);
-            dica.SetToolTip(cartao, "Clique para usar\n" + (ep != null ? ep.Nome : "?") + " + " + (es != null ? es.Nome : "?") + "\n\n" + string.Join("\n",
-                pg.Perks.Take(6).Select(id => { var x = DadosRunas.Achar(id); return x != null ? x.Nome : id.ToString(); }).Concat(pg.Perks.Skip(6).Select(DadosRunas.NomeFragmento))));
+            var r0 = DadosRunas.Achar(pg.Perks[0]);
+            Dica.Em(cartao, r0 != null ? r0.Icone : null, "Clique para usar esta página", (ep != null ? ep.Nome : "?") + " + " + (es != null ? es.Nome : "?"), NomesDaPagina(pg));
             painelStats.Controls.Add(cartao); y += cartao.Height + 4;
         }
     }
@@ -659,7 +749,8 @@ class RunasForm : Form
         if (p == null) { recTexto.Text = "Abra o cliente do LoL para ver a recomendação dele."; return; }
         var r = DadosRunas.Achar(p.Perks.FirstOrDefault()); var ep = DadosRunas.EstiloDe(p.Primaria); var es = DadosRunas.EstiloDe(p.Secundaria);
         recTexto.Text = "★ " + (r != null ? r.Nome : "?") + "\n" + (ep != null ? ep.Nome : "?") + " + " + (es != null ? es.Nome : "?");
-        dica.SetToolTip(recTexto, string.Join("\n", p.Perks.Take(6).Select(id => { var x = DadosRunas.Achar(id); return x != null ? x.Nome : id.ToString(); }).Concat(p.Perks.Skip(6).Select(DadosRunas.NomeFragmento))));
+        var r0 = DadosRunas.Achar(p.Perks.FirstOrDefault());
+        Dica.Em(recTexto, r0 != null ? r0.Icone : null, "Recomendada pelo LoL", (ep != null ? ep.Nome : "?") + " + " + (es != null ? es.Nome : "?"), NomesDaPagina(p));
         usarRec.Enabled = true;
     }
 
@@ -681,6 +772,13 @@ class RunasForm : Form
         return p;
     }
 
+    static string NomesDaPagina(Pagina p)
+    {
+        Func<int, string> n = id => { var x = DadosRunas.Achar(id); return x != null ? x.Nome : id.ToString(); };
+        return "★ " + n(p.Perks[0]) + "\n" + string.Join("\n", p.Perks.Skip(1).Take(3).Select(n)) + "\n\n" + string.Join("\n", p.Perks.Skip(4).Take(2).Select(n))
+            + "\n\n" + string.Join(" · ", p.Perks.Skip(6).Select(DadosRunas.NomeFragmento));
+    }
+
     Label Titulo(string t, int x, int y) { var l = new Label { Text = t, Location = new Point(x, y), AutoSize = true, ForeColor = Cores.Ouro, Font = new Font("Segoe UI", 10.5f, FontStyle.Bold) }; area.Controls.Add(l); return l; }
 
     BotaoRuna Runa(Runa r, int x, int y, int tam, bool marcado, bool algumNaLinha, Action clique)
@@ -688,7 +786,7 @@ class RunasForm : Form
         var b = new BotaoRuna(r.Icone, tam) { Location = new Point(x, y), TextoAlt = r.Nome };
         b.Marcar(marcado, algumNaLinha && !marcado);
         b.Click += (o, e) => clique();
-        dica.SetToolTip(b, r.Nome + (string.IsNullOrEmpty(r.Desc) ? "" : "\n" + r.Desc));
+        Dica.Em(b, r.Icone, r.Nome, DadosRunas.Onde(r.Id), r.Desc);
         area.Controls.Add(b); return b;
     }
 
@@ -708,7 +806,7 @@ class RunasForm : Form
             var b = new BotaoRuna(est.Icone, 50) { Location = new Point(x, 40), TextoAlt = est.Nome };
             b.Marcar(id == prim, prim != 0 && id != prim);
             b.Click += (o, e) => { if (prim == id) return; prim = id; primSel = new int[4]; if (sec == prim) { sec = 0; secSel.Clear(); } Montar(); };
-            dica.SetToolTip(b, est.Nome); area.Controls.Add(b); x += 60;
+            Dica.Em(b, est.Icone, est.Nome, "Árvore principal", "Clique para usar " + est.Nome + " como árvore principal: pedra angular e 3 runas dela."); area.Controls.Add(b); x += 60;
         }
         var ep = DadosRunas.EstiloDe(prim);
         if (ep != null)
@@ -735,7 +833,7 @@ class RunasForm : Form
             var b = new BotaoRuna(est.Icone, 44) { Location = new Point(x, 40), TextoAlt = est.Nome };
             b.Marcar(id == sec, sec != 0 && id != sec);
             b.Click += (o, e) => { if (sec == id) return; sec = id; secSel.Clear(); Montar(); };
-            dica.SetToolTip(b, est.Nome); area.Controls.Add(b); x += 54;
+            Dica.Em(b, est.Icone, est.Nome, "Árvore secundária", "Clique para usar " + est.Nome + " como árvore secundária: 2 runas de linhas diferentes."); area.Controls.Add(b); x += 54;
         }
         var es = DadosRunas.EstiloDe(sec);
         if (es != null)
@@ -761,7 +859,7 @@ class RunasForm : Form
                 var fid = f.Id;
                 // largura fixa: nomes longos quebram em duas linhas
                 var c = new Chip(f.Nome, Cores.Ouro) { Location = new Point(xi, 318 + i * 46), Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), Size = new Size(114, 40) };
-                dica.SetToolTip(c, f.Nome);
+                Dica.Em(c, null, f.Nome, "Fragmento · linha " + (linha + 1), "");
                 c.Selecionado = frag[linha] == fid;
                 c.Click += (o, e) => { frag[linha] = fid; Montar(); };
                 area.Controls.Add(c); xi += c.Width + 6;
@@ -820,7 +918,7 @@ class Janela : Form
 
     public Janela()
     {
-        Text = "AutoPick LoL " + Versao.Atual; BackColor = Cores.Fundo; ForeColor = Cores.Texto; Font = new Font("Segoe UI", 9f);
+        Icon = Programa.Icone; Text = "AutoPick LoL " + Versao.Atual; BackColor = Cores.Fundo; ForeColor = Cores.Texto; Font = new Font("Segoe UI", 9f);
         ClientSize = new Size(1180, 820); MinimumSize = new Size(1000, 600); StartPosition = FormStartPosition.CenterScreen;
         Opacity = 0; DoubleBuffered = true;
 
@@ -854,7 +952,11 @@ class Janela : Form
         chipAceitar.Click += (o, e) => { lock (trava) aceitar = !aceitar; chipAceitar.Selecionado = aceitar; Salvar(); };
         chipRunas.Click += (o, e) => { lock (trava) runas = !runas; chipRunas.Selecionado = runas; Salvar(); };
         linha3.Controls.Add(chipAceitar); linha3.Controls.Add(chipRunas);
+        var chipVerificar = new Chip("Verificar atualização", Cores.Azul);
+        chipVerificar.Click += (o, e) => ProcurarAtualizacao(true);
+        linha3.Controls.Add(chipVerificar);
         chipAtualizar = new Chip("Atualizar", Cores.Ouro) { Visible = false, Selecionado = true };
+        chipAtualizar.Click += (o, e) => Atualizar();
         linha3.Controls.Add(chipAtualizar);
         editor.Controls.Add(linha1); editor.Controls.Add(linha2); editor.Controls.Add(linha3);
 
@@ -887,32 +989,51 @@ class Janela : Form
             fade.Start();
             new Thread(CarregarCampeoes) { IsBackground = true }.Start();
             new Thread(Laco) { IsBackground = true }.Start();
-            new Thread(ProcurarAtualizacao) { IsBackground = true }.Start();
+            ProcurarAtualizacao(false);
         };
     }
 
-    void ProcurarAtualizacao()
+    Tuple<string, string> versaoNova; // (versão, link do instalador) achada pela última verificação
+    bool verificando;
+
+    // manual = clicou em "Verificar atualização": avisa também quando não tem nada novo ou quando falha.
+    void ProcurarAtualizacao(bool manual)
     {
-        Tuple<string, string> nova;
-        try { nova = Atualizador.Verificar(); } catch { return; } // sem internet ou GitHub fora: tenta na próxima vez que abrir
-        if (nova == null) return;
-        Na(() =>
+        if (verificando) return;
+        verificando = true;
+        if (manual) faixa.Mostrar("Verificando atualização...", "Versão instalada: " + Versao.Atual, Cores.Azul, true);
+        new Thread(() =>
         {
-            chipAtualizar.Text = "Atualizar para " + nova.Item1;
-            chipAtualizar.Size = new Size(TextRenderer.MeasureText(chipAtualizar.Text, chipAtualizar.Font).Width + 30, 32);
-            chipAtualizar.Visible = true;
-            faixa.Mostrar("Versão " + nova.Item1 + " disponível!", "Clique em \"Atualizar para " + nova.Item1 + "\". Suas listas e runas continuam.", Cores.Ouro, true);
-            chipAtualizar.Click += (o, e) =>
+            Tuple<string, string> nova = null; string falha = null;
+            try { nova = Atualizador.Verificar(); } catch (Exception e) { falha = e.Message; } // sem internet ou GitHub fora
+            Na(() =>
             {
-                chipAtualizar.Enabled = false;
-                faixa.Mostrar("Baixando a versão " + nova.Item1 + "...", "O AutoPick fecha e abre de novo sozinho.", Cores.Ouro, true);
-                new Thread(() =>
+                verificando = false;
+                if (nova != null)
                 {
-                    try { Atualizador.Instalar(nova.Item2, Pasta); Na(Close); }
-                    catch (Exception ex) { Na(() => { chipAtualizar.Enabled = true; faixa.Mostrar("Não consegui atualizar", ex.Message, Cores.Laranja, false); }); }
-                }) { IsBackground = true }.Start();
-            };
-        });
+                    versaoNova = nova;
+                    chipAtualizar.Text = "Atualizar para " + nova.Item1;
+                    chipAtualizar.Size = new Size(TextRenderer.MeasureText(chipAtualizar.Text, chipAtualizar.Font).Width + 30, 32);
+                    chipAtualizar.Visible = true;
+                    faixa.Mostrar("Versão " + nova.Item1 + " disponível!", "Clique em \"Atualizar para " + nova.Item1 + "\". Suas listas e runas continuam.", Cores.Ouro, true);
+                }
+                else if (!manual) return;
+                else if (falha != null) faixa.Mostrar("Não consegui verificar", "Sem conexão com o GitHub: " + falha, Cores.Laranja, false);
+                else faixa.Mostrar("Você está na versão mais nova", "AutoPick LoL " + Versao.Atual, Cores.Verde, false);
+            });
+        }) { IsBackground = true }.Start();
+    }
+
+    void Atualizar()
+    {
+        var nova = versaoNova; if (nova == null) return;
+        chipAtualizar.Enabled = false;
+        faixa.Mostrar("Baixando a versão " + nova.Item1 + "...", "O AutoPick fecha e abre de novo sozinho.", Cores.Ouro, true);
+        new Thread(() =>
+        {
+            try { Atualizador.Instalar(nova.Item2, Pasta); Na(Close); }
+            catch (Exception ex) { Na(() => { chipAtualizar.Enabled = true; faixa.Mostrar("Não consegui atualizar", ex.Message, Cores.Laranja, false); }); }
+        }) { IsBackground = true }.Start();
     }
 
     static FlowLayoutPanel Linha() { return new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 4) }; }
@@ -1318,7 +1439,7 @@ class Janela : Form
                 Linhas = J.A(J.G(e, "slots")).Select(J.D).Select(sl => J.A(J.G(sl, "runes")).Select(J.D).Where(r => r != null).Select(r => new Runa
                 {
                     Id = J.I(J.G(r, "id")), Nome = J.S(J.G(r, "name")), Icone = J.S(J.G(r, "icon")),
-                    Desc = Regex.Replace(J.S(J.G(r, "shortDesc")), "<[^>]+>", "")
+                    Desc = DadosRunas.Limpar(J.S(J.G(r, "longDesc")) != "" ? J.S(J.G(r, "longDesc")) : J.S(J.G(r, "shortDesc")))
                 }).ToList()).ToList()
             }).ToList();
             Na(() => DadosRunas.Estilos = estilos);
@@ -1363,6 +1484,10 @@ class Janela : Form
 
 static class Programa
 {
+    // ícone embutido no .exe (compilado com -win32icon:app/icone.ico)
+    public static readonly Icon Icone = IconeDoExe();
+    static Icon IconeDoExe() { try { return Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { return null; } }
+
     [STAThread]
     static int Main(string[] args)
     {
@@ -1412,6 +1537,7 @@ static class Programa
             Tuple.Create("página incompleta é ignorada", Pagina.De(J.Ler("{\"primaria\":8100,\"secundaria\":8200,\"perks\":[1,2]}")) == null),
             Tuple.Create("versão nova é detectada", Atualizador.MaisNova("1.0.10", "1.0.9") && !Atualizador.MaisNova("1.0.9", "1.0.10") && !Atualizador.MaisNova("1.0.9", "1.0.9")),
             Tuple.Create("tag estranha não atualiza", !Atualizador.MaisNova("ultima", "1.0.0") && Atualizador.MaisNova("1.0.1", "0.0.0")),
+            Tuple.Create("descrição sem HTML", DadosRunas.Limpar("Dá <b>dano</b>&nbsp;extra.<br><br><br>Recarga: 10s") == "Dá dano\u00a0extra.\n\nRecarga: 10s"),
             Tuple.Create("não age fora da vez", Regras.Decidir(fora, new List<int> { 3 }, new List<int>(), todos) == null),
             Tuple.Create("posição primeiro, depois reserva", string.Join(",", Regras.ListaPick(listas, "middle")) == "Ahri,Zed,Lux"),
             Tuple.Create("sem posição usa reserva", string.Join(",", Regras.ListaPick(listas, "")) == "Lux,Ahri"),
