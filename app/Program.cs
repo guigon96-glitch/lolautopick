@@ -398,6 +398,39 @@ class BotaoRuna : Animado
 
 class PaginaStat : Pagina { public int Jogos, Vitorias; }
 
+// Cartão de uma página popular: pedra angular grande, 3 principais + 2 secundárias, % de vitória e jogos. Clique usa a página.
+class CartaoPagina : Animado
+{
+    readonly PaginaStat p; readonly int total;
+    public CartaoPagina(PaginaStat pg, int totalJogos) { p = pg; total = totalJogos; Size = new Size(290, 68); Font = new Font("Segoe UI", 8f); }
+    void Icone(Graphics g, int id, RectangleF r)
+    {
+        var ru = DadosRunas.Achar(id); Image img = null;
+        if (ru != null) DadosRunas.Imagens.TryGetValue(ru.Icone, out img);
+        if (img != null) Imagem(g, img, r, r.Width, 1f);
+        else using (var b = new SolidBrush(Cores.Linha)) g.FillEllipse(b, r);
+    }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = Preparar(e);
+        using (var c = Redondo(new RectangleF(1, 1, Width - 3, Height - 3), 10))
+        {
+            using (var b = new SolidBrush(Cores.Mix(Cores.CartaoHover, Color.FromArgb(52, 62, 96), hover))) g.FillPath(b, c);
+            using (var pen = new Pen(Cores.Mix(Cores.Linha, Cores.Roxo, hover), 1.5f)) g.DrawPath(pen, c);
+        }
+        Icone(g, p.Perks[0], new RectangleF(8, 10, 48, 48));
+        for (int i = 1; i < 6; i++) Icone(g, p.Perks[i], new RectangleF(64 + (i - 1) * 27 + (i >= 4 ? 10 : 0), 8, 25, 25));
+        var br = new System.Globalization.CultureInfo("pt-BR");
+        double taxa = p.Jogos > 0 ? (double)p.Vitorias / p.Jogos : 0;
+        using (var f = new Font("Segoe UI", 9.5f, FontStyle.Bold)) using (var b = new SolidBrush(taxa >= 0.5 ? Cores.Verde : Cores.Laranja))
+            g.DrawString((taxa * 100).ToString("0.0", br) + "%", f, b, 62, 40);
+        using (var b = new SolidBrush(Cores.Sutil))
+            g.DrawString(p.Jogos.ToString("N0", br) + " jogos" + (total > 0 ? " · " + ((double)p.Jogos / total * 100).ToString("0", br) + "% escolha" : ""), Font, b, 116, 42);
+        if (hover > 0.01f) using (var f = new Font("Segoe UI", 9f, FontStyle.Bold)) using (var b = new SolidBrush(Color.FromArgb((int)(255 * hover), Cores.Roxo)))
+            g.DrawString("Usar", f, b, Width - 46, 10);
+    }
+}
+
 // Editor de runas no estilo do cliente. Ao lado: as mais usadas no BR (seu servidor) e a recomendação do próprio LoL.
 class RunasForm : Form
 {
@@ -421,14 +454,14 @@ class RunasForm : Form
         var lado = new Panel { Location = new Point(780, 12), Size = new Size(306, 580), BackColor = Cores.Cartao };
         lado.Controls.Add(new Label { Text = "Mais usadas no BR", Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Cores.Ouro, Location = new Point(10, 8), AutoSize = true });
         lado.Controls.Add(new Label { Text = (rota == "" ? "Todas as rotas" : Janela.NomePos(rota.ToLowerInvariant())) + " · Esmeralda+", ForeColor = Cores.Sutil, Location = new Point(11, 30), AutoSize = true });
-        painelStats = new Panel { Location = new Point(0, 52), Size = new Size(306, 318) };
+        painelStats = new Panel { Location = new Point(0, 52), Size = new Size(306, 364) };
         lado.Controls.Add(painelStats);
-        lado.Controls.Add(new Label { Text = "Recomendada pelo LoL", Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Cores.Ouro, Location = new Point(10, 378), AutoSize = true });
-        recTexto = new Label { Location = new Point(10, 402), Size = new Size(286, 44), ForeColor = Cores.Texto, Text = "Buscando no cliente..." };
-        usarRec = Botao("Usar esta", Cores.Roxo, new Point(10, 450), 286); usarRec.Enabled = false;
+        lado.Controls.Add(new Label { Text = "Recomendada pelo LoL", Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), ForeColor = Cores.Ouro, Location = new Point(10, 424), AutoSize = true });
+        recTexto = new Label { Location = new Point(10, 448), Size = new Size(286, 36), ForeColor = Cores.Texto, Text = "Buscando no cliente..." };
+        usarRec = Botao("Usar esta", Cores.Roxo, new Point(10, 486), 286); usarRec.Enabled = false;
         usarRec.Click += (o, e) => { if (rec != null) Carregar(rec); };
         lado.Controls.Add(recTexto); lado.Controls.Add(usarRec);
-        lado.Controls.Add(new Label { Text = "% de vitória: partidas Solo/Duo do BR coletadas pelo seu servidor (patch atual e anterior). A recomendação do LoL não informa vitórias.", Location = new Point(10, 496), Size = new Size(286, 80), ForeColor = Cores.Sutil, Font = new Font("Segoe UI", 8f) });
+        lado.Controls.Add(new Label { Text = "% de vitória: partidas Solo/Duo do BR coletadas pelo seu servidor (patch atual e anterior). A recomendação do LoL não informa vitórias.", Location = new Point(10, 528), Size = new Size(286, 50), ForeColor = Cores.Sutil, Font = new Font("Segoe UI", 7.5f) });
 
         salvar = Botao("Salvar runas", Cores.Verde, new Point(20, 600), 160);
         salvar.Click += (o, e) => { Resultado = Montada(); DialogResult = DialogResult.OK; };
@@ -439,7 +472,7 @@ class RunasForm : Form
         falta = new Label { Location = new Point(560, 604), Size = new Size(210, 40), ForeColor = Cores.Sutil };
         Controls.Add(area); Controls.Add(lado); Controls.Add(salvar); Controls.Add(auto); Controls.Add(cancelar); Controls.Add(falta);
 
-        Action redesenhar = () => { foreach (Control c in area.Controls) c.Invalidate(); };
+        Action redesenhar = () => { foreach (Control c in area.Controls) c.Invalidate(); foreach (Control c in painelStats.Controls) c.Invalidate(); };
         DadosRunas.Mudou += redesenhar; FormClosed += (o, e) => DadosRunas.Mudou -= redesenhar;
         if (atual != null) Carregar(atual);
         else { prim = DadosRunas.Estilos.Count > 0 ? DadosRunas.Estilos[0].Id : 0; Montar(); }
@@ -488,7 +521,6 @@ class RunasForm : Form
     void MostrarStats(Dictionary<string, object> d, Label carregando)
     {
         carregando.Dispose();
-        var br = new System.Globalization.CultureInfo("pt-BR");
         if (d == null || J.G(d, "falha") != null)
         {
             Texto(painelStats, "Não consegui falar com o servidor" + (d == null ? "." : ": " + J.S(J.G(d, "falha"))), 10, 4, 286, 60, Cores.Laranja);
@@ -507,19 +539,13 @@ class RunasForm : Form
         int y = 2;
         foreach (var p in lista)
         {
-            var r = DadosRunas.Achar(p.Perks[0]); var ep = DadosRunas.EstiloDe(p.Primaria); var es = DadosRunas.EstiloDe(p.Secundaria);
-            double taxa = p.Jogos > 0 ? (double)p.Vitorias / p.Jogos : 0;
-            var caixa = new Panel { Location = new Point(8, y), Size = new Size(290, 98), BackColor = Cores.CartaoHover };
-            Texto(caixa, "★ " + (r != null ? r.Nome : "?"), 8, 6, 200, 20, Cores.Texto, 9.5f, FontStyle.Bold);
-            Texto(caixa, (ep != null ? ep.Nome : "?") + " + " + (es != null ? es.Nome : "?"), 8, 27, 270, 18, Cores.Sutil);
-            Texto(caixa, (taxa * 100).ToString("0.0", br) + "% de vitória", 8, 48, 180, 20, taxa >= 0.5 ? Cores.Verde : Cores.Laranja, 10f, FontStyle.Bold);
-            Texto(caixa, p.Jogos.ToString("N0", br) + " jogos · " + (total > 0 ? ((double)p.Jogos / total * 100).ToString("0", br) + "% das partidas" : ""), 8, 72, 200, 18, Cores.Sutil, 8f);
-            var usar = Botao("Usar", Cores.Roxo, new Point(214, 52), 68); usar.Height = 32;
-            var pg = p; usar.Click += (o, e) => Carregar(pg);
-            caixa.Controls.Add(usar);
-            var nomes = string.Join("\n", pg.Perks.Take(6).Select(id => { var x = DadosRunas.Achar(id); return x != null ? x.Nome : id.ToString(); }).Concat(pg.Perks.Skip(6).Select(DadosRunas.NomeFragmento)));
-            dica.SetToolTip(caixa, nomes); foreach (Control c in caixa.Controls) dica.SetToolTip(c, nomes);
-            painelStats.Controls.Add(caixa); y += 104;
+            var pg = p;
+            var cartao = new CartaoPagina(pg, total) { Location = new Point(8, y) };
+            cartao.Click += (o, e) => Carregar(pg);
+            var ep = DadosRunas.EstiloDe(pg.Primaria); var es = DadosRunas.EstiloDe(pg.Secundaria);
+            dica.SetToolTip(cartao, "Clique para usar\n" + (ep != null ? ep.Nome : "?") + " + " + (es != null ? es.Nome : "?") + "\n\n" + string.Join("\n",
+                pg.Perks.Take(6).Select(id => { var x = DadosRunas.Achar(id); return x != null ? x.Nome : id.ToString(); }).Concat(pg.Perks.Skip(6).Select(DadosRunas.NomeFragmento))));
+            painelStats.Controls.Add(cartao); y += 72;
         }
     }
 

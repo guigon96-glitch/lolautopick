@@ -121,7 +121,7 @@ export async function consultar(db, campeao, rota) {
   const args = [campeao, ...patches, ...(rota ? [rota] : [])];
   const total = await db.prepare(`SELECT COALESCE(SUM(jogos), 0) AS n FROM stats WHERE ${filtro}`).bind(...args).first('n');
   const { results } = await db.prepare(
-    `SELECT pagina, SUM(jogos) AS jogos, SUM(vitorias) AS vitorias FROM stats WHERE ${filtro} GROUP BY pagina HAVING SUM(jogos) >= 3 ORDER BY jogos DESC LIMIT 3`)
+    `SELECT pagina, SUM(jogos) AS jogos, SUM(vitorias) AS vitorias FROM stats WHERE ${filtro} GROUP BY pagina HAVING SUM(jogos) >= 3 ORDER BY jogos DESC LIMIT 5`)
     .bind(...args).all();
   return {
     patches, total,
