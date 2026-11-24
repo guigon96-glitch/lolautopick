@@ -53,6 +53,8 @@ makensis -DVERSAO=1.0.0 instalador/autopick.nsi
 cd servidor && node teste.mjs
 ```
 
+Teste da seleção de campeões sem o LoL: `app/lcu_falso.py` imita a API local do cliente numa partida de escolha alternada (instruções no topo do arquivo).
+
 ## Avisos
 
 A API local do cliente não é oficialmente suportada pela Riot; ferramentas como Blitz e Porofessor fazem o mesmo, mas o uso é por sua conta.

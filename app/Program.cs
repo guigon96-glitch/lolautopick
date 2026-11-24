@@ -1291,7 +1291,7 @@ class Janela : Form
 
     void Laco()
     {
-        Lcu con = null; int runasPara = 0; string posVista = null;
+        Lcu con = null; int runasPara = 0; string posVista = null, ultimoErro = null;
         var falhas = new HashSet<int>(); var avisados = new HashSet<string>();
         var marcados = new HashSet<string>(); var inicioBan = new Dictionary<int, DateTime>();
         while (true)
@@ -1351,6 +1351,12 @@ class Janela : Form
                     Na(() => MudarAlvo(conhecida ? pos : ""));
                     Estado(pos == "" ? "Seleção de campeões" : "Você caiu de " + NomePos(pos) + "!",
                         pos == "" ? "Modo sem rota: usando picks e bans de Qualquer." : "Usando picks e bans de " + NomePos(pos) + " (se acabarem, Qualquer).", Cores.Azul, false);
+                    List<int> vp, vb; lock (trava) { vp = Converter(Regras.ListaPick(picks, pos), avisados); vb = Converter(Regras.ListaPick(bans, pos), avisados); }
+                    con.Req("GET", "/lol-gameflow/v1/session", null, out tx);
+                    var fila = J.D(J.G(J.D(J.G(J.D(J.Ler(tx)), "gameData")), "queue"));
+                    Log("Fila: " + J.S(J.G(fila, "description")) + " (" + J.I(J.G(fila, "id")) + ", " + J.S(J.G(fila, "gameMode")) + ")"
+                        + " · rota no cliente: \"" + J.S(J.G(me, "assignedPosition")) + "\" · fase: " + J.S(J.G(J.D(J.G(s, "timer")), "phase"))
+                        + " · picks: " + (vp.Count == 0 ? "(vazia)" : string.Join(", ", vp.Select(Nome))) + " · bans: " + (vb.Count == 0 ? "(vazia)" : string.Join(", ", vb.Select(Nome))));
                 }
 
                 // Runas: depois que o seu campeão trava (por mim ou por você).
@@ -1417,6 +1423,10 @@ class Janela : Form
             catch (Exception e)
             {
                 con = null; conAtual = null; // cliente fechou ou reiniciou: relê o lockfile (porta e senha mudam)
+                // cliente fechado é normal; qualquer outro erro vai para o registro (uma vez por mensagem) para dar para achar a causa
+                bool fechado = e is FileNotFoundException || e is DirectoryNotFoundException
+                    || (e is WebException && ((WebException)e).Status == WebExceptionStatus.ConnectFailure);
+                if (!fechado && e.Message != ultimoErro) { ultimoErro = e.Message; Log("Erro: " + e); }
                 Estado("Esperando o LoL abrir...", e is FileNotFoundException || e is DirectoryNotFoundException ? "Procurando o cliente em " + pastaLol : "", Cores.Sutil, true);
             }
         }
