@@ -20,10 +20,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Instalar compilador C# (Mono)
         run: sudo apt-get update -q && sudo apt-get install -y -q mono-mcs libmono-system-windows-forms4.0-cil libmono-system-web-extensions4.0-cil nsis
+      # Compila contra as bibliotecas de referência oficiais do .NET Framework 4.8: assim o Mono só enxerga o que existe
+      # no Windows (senão escolhe métodos que só o Mono tem, como TrimStart(char), e o app quebra no Windows).
+      - name: Bibliotecas de referência do .NET Framework 4.8
+        run: |
+          curl -sfL -o ref.nupkg https://api.nuget.org/v3-flatcontainer/microsoft.netframework.referenceassemblies.net48/1.0.3/microsoft.netframework.referenceassemblies.net48.1.0.3.nupkg
+          unzip -q -o ref.nupkg 'build/.NETFramework/v4.8/*' -d ref
       - name: Compilar
         run: |
           echo "static class Versao { public const string Atual = \"$VERSAO\"; }" > app/Versao.cs
-          mcs -target:winexe -optimize -win32icon:app/icone.ico -out:AutoPickLoL.exe -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll app/Program.cs app/Versao.cs
+          mcs -target:winexe -optimize -win32icon:app/icone.ico -nostdlib -lib:ref/build/.NETFramework/v4.8 -out:AutoPickLoL.exe \
+            -r:mscorlib.dll -r:System.dll -r:System.Core.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll -r:System.Web.Extensions.dll \
+            app/Program.cs app/Versao.cs
       - name: Testes
         run: mono AutoPickLoL.exe --teste
       - name: Instalador

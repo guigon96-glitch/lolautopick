@@ -5,3 +5,5 @@ autopick.log
 icones/
 node_modules/
 .wrangler/
+ref/
+ref.nupkg

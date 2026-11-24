@@ -43,7 +43,9 @@ Com a chave pessoal (100 pedidos a cada 2 min) o coletor lê ~5,7 mil partidas p
 ## Testes
 
 ```bash
-mcs -target:winexe -win32icon:app/icone.ico -out:AutoPickLoL.exe -r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Web.Extensions.dll app/Program.cs app/Versao.cs && mono AutoPickLoL.exe --teste
+# bibliotecas de referência do .NET Framework 4.8 (compilar contra elas evita usar métodos que só existem no Mono)
+curl -sfL -o ref.nupkg https://api.nuget.org/v3-flatcontainer/microsoft.netframework.referenceassemblies.net48/1.0.3/microsoft.netframework.referenceassemblies.net48.1.0.3.nupkg && unzip -q -o ref.nupkg 'build/.NETFramework/v4.8/*' -d ref
+mcs -target:winexe -win32icon:app/icone.ico -nostdlib -lib:ref/build/.NETFramework/v4.8 -r:mscorlib.dll -r:System.dll -r:System.Core.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll -r:System.Web.Extensions.dll -out:AutoPickLoL.exe app/Program.cs app/Versao.cs && mono AutoPickLoL.exe --teste
 makensis -DVERSAO=1.0.0 instalador/autopick.nsi
 ```
 
