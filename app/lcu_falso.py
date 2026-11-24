@@ -6,6 +6,7 @@ import json, ssl, sys, time, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 EU = 2
+NAO_TEM = {102}  # Shyvana: o cliente recusa escolher
 CAMPEOES = {28: 'Evelynn', 131: 'Diana', 102: 'Shyvana', 99: 'Lux', 238: 'Zed', 157: 'Yasuo', 11: 'Master Yi', 64: 'Lee Sin'}
 ALIAS = {11: 'MasterYi', 64: 'LeeSin'}
 inicio = time.time()
@@ -55,7 +56,8 @@ class H(BaseHTTPRequestHandler):
                 return self.responder({'localPlayerCellId': EU, 'actions': [[a for a in acoes if a['type'] == 'ban'], [a for a in acoes if a['type'] == 'pick']],
                                        'myTeam': time_aliado, 'theirTeam': [{'cellId': c, 'championId': 0} for c in range(5, 10)],
                                        'bans': {'myTeamBans': [], 'theirTeamBans': []}, 'timer': {'phase': fase}})
-            if p in ('/lol-champ-select/v1/pickable-champion-ids', '/lol-champ-select/v1/bannable-champion-ids'): return self.responder(list(CAMPEOES))
+            # imita o problema visto no cliente de verdade: a lista de "disponíveis" vem sem alguns campeões que o jogador tem
+            if p in ('/lol-champ-select/v1/pickable-champion-ids', '/lol-champ-select/v1/bannable-champion-ids'): return self.responder([i for i in CAMPEOES if i >= 100])
             if p.startswith('/lol-perks/'): return self.responder([])
             return self.responder({'erro': p}, 404)
     def do_PATCH(self):
@@ -63,6 +65,9 @@ class H(BaseHTTPRequestHandler):
         with trava:
             avancar(); aid = int(self.path.rsplit('/', 1)[1]); a = next(x for x in acoes if x['id'] == aid)
             if a['completed']: return self.responder({'message': 'acao ja completa'}, 500)
+            if a['type'] == 'pick' and corpo.get('championId') in NAO_TEM:
+                log.append('%5.1fs PATCH recusado (nao tem) %s' % (time.time() - inicio, CAMPEOES[corpo['championId']]))
+                return self.responder({'httpStatus': 400, 'message': 'Invalid champion'}, 400)
             a['championId'] = corpo.get('championId', 0)
             log.append('%5.1fs PATCH %s %s cel %d -> %s' % (time.time() - inicio, a['type'], 'em andamento' if a['isInProgress'] else 'marcacao', a['actorCellId'], CAMPEOES.get(a['championId'])))
             self.send_response(204); self.end_headers()

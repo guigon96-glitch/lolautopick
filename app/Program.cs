@@ -73,6 +73,7 @@ static class Regras
 {
     // null = não é sua vez. Na hora do ban, não bane o que algum aliado marcou ou declarou.
     // acao: usa esta ação em vez da que está em andamento (para marcar o pick antes da sua vez).
+    // disp: campeões permitidos, ou null para não filtrar (o cliente recusa na hora e o app passa para o próximo).
     public static Decisao Decidir(Dictionary<string, object> s, List<int> picks, List<int> bans, HashSet<int> disp, Dictionary<string, object> acao = null)
     {
         int eu = J.I(J.G(s, "localPlayerCellId"));
@@ -92,7 +93,7 @@ static class Regras
         foreach (var c in d.Ban ? bans : picks)
         {
             string motivo = usados.Contains(c) ? "banido ou já escolhido"
-                : !disp.Contains(c) ? (d.Ban ? "indisponível" : "você não tem ou indisponível")
+                : disp != null && !disp.Contains(c) ? (d.Ban ? "indisponível" : "você não tem ou indisponível")
                 : d.Ban && aliados.Contains(c) ? "um aliado quer" : null;
             if (motivo == null) { d.Campeao = c; return d; }
             d.Pulados.Add(new KeyValuePair<int, string>(c, motivo));
@@ -1382,15 +1383,18 @@ class Janela : Form
                 if (minha == null)
                 {
                     if (meuPick == null) { if (!travou) Estado("Seleção de campeões", "Esperando. " + ondeEstou, Cores.Ouro, true); continue; }
-                    con.Req("GET", "/lol-champ-select/v1/pickable-champion-ids", null, out tx);
-                    var h = Regras.Decidir(s, lp, lb, new HashSet<int>(J.A(J.Ler(tx)).Select(J.I)), meuPick);
+                    // a lista de "disponíveis" do cliente deixou de fora campeões que o jogador tem; tenta direto e pula o que o cliente recusar
                     int marcado = J.I(J.G(meuPick, "championId"));
-                    if (h.Campeao != 0 && h.Campeao != marcado)
+                    // se o cliente recusar marcar o melhor da lista, marca o próximo (até 3 por segundo); volta a tentar o melhor a cada segundo
+                    var tentar = lp.Where(x => !falhas.Contains(x)).ToList();
+                    for (int k = 0; k < 3; k++)
                     {
-                        // tenta de novo a cada segundo (na fase de bans o cliente pode recusar), mas avisa só uma vez
+                        var h = Regras.Decidir(s, tentar, lb, null, meuPick);
+                        if (h.Campeao == 0 || h.Campeao == marcado) break;
                         int sm = con.Req("PATCH", "/lol-champ-select/v1/session/actions/" + J.I(J.G(meuPick, "id")), J.Escrever(new Dictionary<string, object> { { "championId", h.Campeao } }), out tx);
-                        if (sm < 400) { marcado = h.Campeao; Log("Pick marcado: " + Nome(marcado)); }
-                        else if (marcados.Add(J.I(J.G(meuPick, "id")) + ":" + h.Campeao)) Log("Ainda não deu para marcar " + Nome(h.Campeao) + " (erro " + sm + "). Tento de novo e travo na sua vez.");
+                        if (sm < 400) { marcado = h.Campeao; Log("Pick marcado: " + Nome(marcado)); break; }
+                        if (marcados.Add(J.I(J.G(meuPick, "id")) + ":" + h.Campeao)) Log("Não deu para marcar " + Nome(h.Campeao) + " (erro " + sm + " " + tx + "). Marco o próximo e tento de novo na sua vez.");
+                        tentar.Remove(h.Campeao);
                     }
                     Estado("Seleção de campeões", (marcado > 0 ? "Pick marcado: " + Nome(marcado) + ". Travo quando chegar a sua vez. " : "Esperando a sua vez. ") + ondeEstou, Cores.Ouro, true, false);
                     continue;
@@ -1404,9 +1408,7 @@ class Janela : Form
                     int falta = 5 - (int)(DateTime.Now - t0).TotalSeconds;
                     if (falta > 0) { Estado("Sua vez de banir", "Esperando " + falta + "s para ver o que o time quer jogar...", Cores.Vermelho, true, false); continue; }
                 }
-                con.Req("GET", ehBan ? "/lol-champ-select/v1/bannable-champion-ids" : "/lol-champ-select/v1/pickable-champion-ids", null, out tx);
-                var disp = new HashSet<int>(J.A(J.Ler(tx)).Select(J.I));
-                var d = Regras.Decidir(s, lp, lb.Where(x => !falhas.Contains(x)).ToList(), disp);
+                var d = Regras.Decidir(s, lp.Where(x => !falhas.Contains(x)).ToList(), lb.Where(x => !falhas.Contains(x)).ToList(), null);
                 if (d == null) continue;
                 string verbo = d.Ban ? "banir" : "escolher";
                 string pulos = string.Join(", ", d.Pulados.Select(p => Nome(p.Key) + " (" + p.Value + ")"));
@@ -1416,7 +1418,7 @@ class Janela : Form
                 string url = "/lol-champ-select/v1/session/actions/" + J.I(J.G(d.Acao, "id"));
                 int st = con.Req("PATCH", url, J.Escrever(new Dictionary<string, object> { { "championId", d.Campeao } }), out tx);
                 if (st < 400) st = con.Req("POST", url + "/complete", null, out tx);
-                if (st >= 400) { falhas.Add(d.Campeao); Log("Falhou ao " + verbo + " " + Nome(d.Campeao) + " (erro " + st + ") " + tx); }
+                if (st >= 400) { falhas.Add(d.Campeao); Log("O cliente recusou " + verbo + " " + Nome(d.Campeao) + " (erro " + st + ": " + tx + "). Vou para o próximo da lista."); }
                 else if (d.Ban) Estado("Banido: " + Nome(d.Campeao), ondeEstou, Cores.Vermelho, false);
                 else Estado("Travado: " + Nome(d.Campeao) + "!", ondeEstou, Cores.Azul, false);
             }
@@ -1592,6 +1594,7 @@ static class Programa
             Tuple.Create("versão nova é detectada", Atualizador.MaisNova("1.0.10", "1.0.9") && !Atualizador.MaisNova("1.0.9", "1.0.10") && !Atualizador.MaisNova("1.0.9", "1.0.9")),
             Tuple.Create("tag estranha não atualiza", !Atualizador.MaisNova("ultima", "1.0.0") && Atualizador.MaisNova("1.0.1", "0.0.0")),
             Tuple.Create("descrição sem HTML", DadosRunas.Limpar("Dá <b>dano</b>&nbsp;extra.<br><br><br>Recarga: 10s") == "Dá dano\u00a0extra.\n\nRecarga: 10s"),
+            Tuple.Create("sem filtro do cliente", Regras.Decidir(pick, new List<int> { 1, 2, 3 }, new List<int>(), null).Campeao == 3),
             Tuple.Create("não age fora da vez", Regras.Decidir(fora, new List<int> { 3 }, new List<int>(), todos) == null),
             Tuple.Create("posição primeiro, depois reserva", string.Join(",", Regras.ListaPick(listas, "middle")) == "Ahri,Zed,Lux"),
             Tuple.Create("sem posição usa reserva", string.Join(",", Regras.ListaPick(listas, "")) == "Lux,Ahri"),
