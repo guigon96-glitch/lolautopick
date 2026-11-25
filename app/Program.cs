@@ -101,21 +101,13 @@ static class Regras
         return d;
     }
 
-    // Feitiços da rota (2 escolhidos) ou, se não tiver, os de Qualquer. Usando os de Qualquer fora da selva,
-    // Smite (11) vira Ignite (14), ou Teleporte (12) se já tiver Ignite. null = nada configurado.
+    // Feitiços da rota (os 2 escolhidos), com o Flash no lado preferido. null = rota sem feitiços (não mexe).
     public static int[] FeiticosPara(Dictionary<string, List<int>> f, string pos, bool flashNoF)
     {
         List<int> l;
-        int[] r = null;
-        if (!string.IsNullOrEmpty(pos) && f.TryGetValue(pos, out l) && l.Count == 2 && l.All(x => x > 0)) r = l.ToArray();
-        else if (f.TryGetValue("", out l) && l.Count == 2 && l.All(x => x > 0))
-        {
-            r = l.ToArray();
-            if (!string.IsNullOrEmpty(pos) && pos != "jungle")
-                for (int i = 0; i < 2; i++) if (r[i] == 11) r[i] = r[1 - i] == 14 ? 12 : 14;
-        }
-        if (r != null) { var lr = r.ToList(); OrdenarFlash(lr, flashNoF); r = lr.ToArray(); }
-        return r;
+        if (string.IsNullOrEmpty(pos) || !f.TryGetValue(pos, out l) || l.Count != 2 || !l.All(x => x > 0)) return null;
+        var r = l.ToList(); OrdenarFlash(r, flashNoF);
+        return r.ToArray();
     }
 
     // Flash (4) no lado preferido: D = primeiro feitiço, F = segundo.
@@ -125,13 +117,11 @@ static class Regras
         if ((flashNoF && l[0] == 4) || (!flashNoF && l[1] == 4)) { var t = l[0]; l[0] = l[1]; l[1] = t; }
     }
 
-    // Picks da posição sorteada primeiro, depois a lista reserva ("") sem repetir.
+    // Só a lista da rota em que caiu: rota vazia ou modo sem rota = lista vazia (o app não escolhe nem bane).
     public static List<string> ListaPick(Dictionary<string, List<string>> picks, string pos)
     {
-        var r = new List<string>(); List<string> l;
-        if (!string.IsNullOrEmpty(pos) && picks.TryGetValue(pos, out l)) r.AddRange(l);
-        if (picks.TryGetValue("", out l)) r.AddRange(l.Where(x => !r.Contains(x)));
-        return r;
+        List<string> l;
+        return !string.IsNullOrEmpty(pos) && picks.TryGetValue(pos, out l) ? l.ToList() : new List<string>();
     }
 }
 
@@ -159,7 +149,7 @@ class Lcu
 
 static class Cores
 {
-    public static readonly Color Fundo = Color.FromArgb(13, 17, 28), Cartao = Color.FromArgb(24, 30, 46), CartaoHover = Color.FromArgb(36, 46, 72),
+    public static readonly Color Fundo = Color.FromArgb(13, 17, 28), Painel = Color.FromArgb(18, 24, 38), Cartao = Color.FromArgb(24, 30, 46), CartaoHover = Color.FromArgb(36, 46, 72),
         Texto = Color.FromArgb(236, 232, 222), Sutil = Color.FromArgb(135, 145, 168), Linha = Color.FromArgb(44, 52, 76),
         Ouro = Color.FromArgb(200, 155, 60), Azul = Color.FromArgb(10, 200, 185), Vermelho = Color.FromArgb(232, 64, 87),
         Verde = Color.FromArgb(70, 200, 110), Roxo = Color.FromArgb(140, 110, 240), Laranja = Color.FromArgb(240, 150, 50);
@@ -324,7 +314,10 @@ class Cartao : Animado
 class Vaga : Animado
 {
     public int Numero; public string Id, Nome; Image icone, arvorePrim, arvoreSec; public Color Cor = Cores.Azul; float pop; bool sobreRuna;
-    public Vaga(int n) { Numero = n; Size = new Size(68, 68); Margin = new Padding(4); Font = new Font("Segoe UI", 16f, FontStyle.Bold); }
+    public readonly bool Ban; // vaga de ban: aparece riscada e não tem botão de runas
+    string aoVivo; // "Marcado", "Travado", "Banido": o que o app fez com este campeão na seleção em andamento
+    public string AoVivo { get { return aoVivo; } set { if (aoVivo == value) return; aoVivo = value; if (value != null) pop = 1; Animar(); } }
+    public Vaga(int n, bool ban) { Numero = n; Ban = ban; Size = new Size(68, 68); Margin = new Padding(4); Font = new Font("Segoe UI", 16f, FontStyle.Bold); }
     // ícones das árvores principal e secundária das runas salvas do campeão (null: mostra o símbolo genérico)
     public void Definir(string id, string nome, Image ic, Color cor, Image prim, Image sec)
     {
@@ -334,7 +327,7 @@ class Vaga : Animado
     // botão de runas no canto inferior esquerdo: árvore principal e, à direita dela, a secundária menor; abre o editor de runas
     RectangleF AreaRuna { get { return new RectangleF(1, Height - 27, 26, 26); } }
     RectangleF AreaSec { get { return new RectangleF(23, Height - 21, 19, 19); } }
-    public bool NaRuna(Point p) { return Id != null && (AreaRuna.Contains(p) || (arvorePrim != null && AreaSec.Contains(p))); }
+    public bool NaRuna(Point p) { return Id != null && !Ban && (AreaRuna.Contains(p) || (arvorePrim != null && AreaSec.Contains(p))); }
     protected override void OnMouseMove(MouseEventArgs e) { var s = NaRuna(e.Location); if (s != sobreRuna) { sobreRuna = s; Invalidate(); } base.OnMouseMove(e); }
     protected override void OnMouseLeave(EventArgs e) { sobreRuna = false; base.OnMouseLeave(e); }
     protected override bool Passo() { return base.Passo() | Aproxima(ref pop, 0); }
@@ -354,12 +347,19 @@ class Vaga : Animado
         if (icone != null) Imagem(g, icone, ir, 12, 1);
         else using (var p = Redondo(ir, 12)) using (var b = new SolidBrush(Cores.Cartao)) { g.FillPath(b, p); using (var f = new Font("Segoe UI", 7.5f)) using (var t = new SolidBrush(Cores.Texto)) g.DrawString(Nome, f, t, ir, Cores.Centro); }
         using (var p = Redondo(ir, 12)) using (var pen = new Pen(Cor, 2)) g.DrawPath(pen, p);
+        if (Ban)
+        {
+            // ban riscado, como na seleção de campeões
+            using (var p = Redondo(ir, 12)) using (var b = new SolidBrush(Color.FromArgb(90, 0, 0, 0))) g.FillPath(b, p);
+            using (var pen = new Pen(Cores.Vermelho, 3f)) g.DrawLine(pen, ir.Right - 8, ir.Y + 8, ir.X + 8, ir.Bottom - 8);
+        }
         if (hover > 0.01f)
         {
             using (var p = Redondo(ir, 12)) using (var b = new SolidBrush(Color.FromArgb((int)(170 * hover), 0, 0, 0))) g.FillPath(b, p);
             using (var f = new Font("Segoe UI", 8f, FontStyle.Bold)) using (var b = new SolidBrush(Color.FromArgb((int)(255 * hover), sobreRuna ? Cores.Roxo : Cores.Texto)))
                 g.DrawString(sobreRuna ? "Runas" : "Tirar", f, b, new RectangleF(ir.X, ir.Y, ir.Width, ir.Height - 14), Cores.Centro);
         }
+        if (Ban) { DesenharNumero(g); return; }
         var ar = AreaRuna;
         var anel = new Pen(sobreRuna ? Cores.Ouro : Cores.Roxo, sobreRuna ? 2.5f : 1.5f);
         if (arvorePrim != null && arvoreSec != null)
@@ -383,6 +383,16 @@ class Vaga : Animado
             }
         }
         g.DrawEllipse(anel, ar); anel.Dispose();
+        DesenharNumero(g);
+    }
+    void DesenharNumero(Graphics g)
+    {
+        if (aoVivo != null && Id != null)
+        {
+            var r = new RectangleF(22, 3, Width - 26, 16);
+            using (var p = Redondo(r, 8)) using (var b = new SolidBrush(Ban ? Cores.Vermelho : aoVivo == "Travado" ? Cores.Verde : Cores.Ouro)) g.FillPath(b, p);
+            using (var f = new Font("Segoe UI", 7f, FontStyle.Bold)) using (var b = new SolidBrush(Cores.Fundo)) g.DrawString(aoVivo, f, b, r, Cores.Centro);
+        }
         var c = new RectangleF(0, 0, 20, 20);
         using (var b = new SolidBrush(Cor)) g.FillEllipse(b, c);
         using (var f = new Font("Segoe UI", 8f, FontStyle.Bold)) using (var b = new SolidBrush(Cores.Fundo)) g.DrawString(Numero.ToString(), f, b, c, Cores.Centro);
@@ -941,13 +951,50 @@ class RunasForm : Form
 
 class PainelSuave : FlowLayoutPanel { public PainelSuave() { DoubleBuffered = true; } }
 
+// Rota na coluna da esquerda: nome e resumo ("3 picks, 2 bans"); a selecionada ganha a barra dourada.
+class ItemRota : Animado
+{
+    bool sel; float s; public string Resumo = "";
+    public bool Selecionado { get { return sel; } set { if (sel == value) return; sel = value; Animar(); } }
+    public ItemRota(string nome) { Text = nome; Size = new Size(176, 46); Margin = new Padding(0, 1, 0, 1); }
+    protected override bool Passo() { return base.Passo() | Aproxima(ref s, sel ? 1 : 0); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = Preparar(e);
+        using (var p = Redondo(new RectangleF(0, 0, Width - 1, Height - 1), 8))
+        using (var b = new SolidBrush(Cores.Mix(Cores.Mix(Parent.BackColor, Cores.CartaoHover, hover * 0.6f), Cores.CartaoHover, s))) g.FillPath(b, p);
+        using (var b = new SolidBrush(Color.FromArgb((int)(255 * s), Cores.Ouro))) g.FillRectangle(b, 0, 9, 3, Height - 18);
+        using (var f = new Font("Segoe UI Semibold", 10.5f)) using (var b = new SolidBrush(Cores.Mix(Cores.Texto, Cores.Ouro, s))) g.DrawString(Text, f, b, 14, 4);
+        using (var f = new Font("Segoe UI", 8.5f)) using (var b = new SolidBrush(Cores.Sutil)) g.DrawString(Resumo, f, b, 14, 25);
+    }
+}
+
+// Liga/desliga com trilho e bolinha; o clique já troca o estado (o evento Click vem depois, com o valor novo).
+class Interruptor : Animado
+{
+    bool ligado; float pos; readonly Color cor;
+    public bool Ligado { get { return ligado; } set { if (ligado == value) return; ligado = value; Animar(); } }
+    public Interruptor(string texto, Color c) { Text = texto; cor = c; Size = new Size(176, 30); Margin = new Padding(0, 2, 0, 2); Font = new Font("Segoe UI", 9.5f); }
+    protected override bool Passo() { return base.Passo() | Aproxima(ref pos, ligado ? 1 : 0); }
+    protected override void OnClick(EventArgs e) { Ligado = !Ligado; base.OnClick(e); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = Preparar(e);
+        var t = new RectangleF(4, 6, 36, 18);
+        using (var p = Redondo(t, 9)) using (var b = new SolidBrush(Cores.Mix(Cores.Linha, cor, pos))) g.FillPath(b, p);
+        using (var b = new SolidBrush(Cores.Mix(Cores.Sutil, Color.White, pos))) g.FillEllipse(b, t.X + 2 + pos * 18, t.Y + 2, 14, 14);
+        using (var b = new SolidBrush(Cores.Mix(Cores.Sutil, Cores.Texto, Math.Max(pos, hover))))
+        using (var sf = new StringFormat { LineAlignment = StringAlignment.Center }) g.DrawString(Text, Font, b, new RectangleF(48, 0, Width - 48, Height), sf);
+    }
+}
+
 class Janela : Form
 {
     static readonly string Pasta = Path.GetDirectoryName(Application.ExecutablePath);
     static readonly string ArqCfg = Path.Combine(Pasta, "config.json");
     // chave da posição no cliente → nome mostrado. "" = lista reserva para qualquer posição.
     public static readonly string[][] Posicoes = {
-        new[] { "", "Qualquer" }, new[] { "top", "Topo" }, new[] { "jungle", "Caçador" },
+        new[] { "top", "Topo" }, new[] { "jungle", "Caçador" },
         new[] { "middle", "Meio" }, new[] { "bottom", "Atirador" }, new[] { "utility", "Suporte" } };
     static readonly string[][] Classes = {
         new[] { "", "Todas" }, new[] { "Fighter", "Lutador" }, new[] { "Mage", "Mago" }, new[] { "Assassin", "Assassino" },
@@ -971,53 +1018,74 @@ class Janela : Form
     List<Cartao> cartoes = new List<Cartao>();
 
     string tipo = "picks"; // "picks", "bans" ou "runas"
-    string alvo = "";      // rota sendo editada ("" = Qualquer)
+    string alvo = "top";   // rota sendo editada
     string classe = "";    // filtro de classe
     Faixa faixa;
-    readonly Vaga[] vagas = new Vaga[5];
-    readonly Dictionary<string, Chip> chipsTipo = new Dictionary<string, Chip>(), chipsAlvo = new Dictionary<string, Chip>(), chipsClasse = new Dictionary<string, Chip>();
-    Chip chipAceitar, chipRunas, chipAtualizar;
-    Label dica, rotuloRota;
+    readonly Vaga[] vagasPick = new Vaga[5], vagasBan = new Vaga[5];
+    readonly Dictionary<string, Chip> chipsTipo = new Dictionary<string, Chip>(), chipsClasse = new Dictionary<string, Chip>();
+    readonly Dictionary<string, ItemRota> itensRota = new Dictionary<string, ItemRota>();
+    Interruptor chipAceitar, chipRunas;
+    Chip chipAtualizar;
+    Label dica, tituloRota, rotuloPicks, rotuloBans, ultimaLinha;
     TextBox busca, log;
+    Panel rodape;
     PainelSuave grade;
 
     public Janela()
     {
         Icon = Programa.Icone; Text = "AutoPick LoL " + Versao.Atual; BackColor = Cores.Fundo; ForeColor = Cores.Texto; Font = new Font("Segoe UI", 9f);
-        ClientSize = new Size(1180, 820); MinimumSize = new Size(1000, 600); StartPosition = FormStartPosition.CenterScreen;
+        ClientSize = new Size(1220, 860); MinimumSize = new Size(1100, 680); StartPosition = FormStartPosition.CenterScreen;
         Opacity = 0; DoubleBuffered = true;
 
         faixa = new Faixa { Dock = DockStyle.Top };
 
-        var editor = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14, 10, 14, 2) };
-        var linha1 = Linha();
-        linha1.Controls.Add(Rotulo("Lista:"));
-        foreach (var t in new[] { new[] { "picks", "Picks" }, new[] { "bans", "Bans" }, new[] { "runas", "Runas" } })
-        {
-            var chave = t[0]; var c = new Chip(t[1], chave == "picks" ? Cores.Azul : chave == "bans" ? Cores.Vermelho : Cores.Roxo);
-            c.Click += (o, e) => MudarTipo(chave); chipsTipo[chave] = c; linha1.Controls.Add(c);
-        }
-        rotuloRota = Rotulo("   Rota:"); linha1.Controls.Add(rotuloRota);
+        // Coluna da esquerda: rotas, opções automáticas e versão.
+        var trilho = new FlowLayoutPanel { Dock = DockStyle.Left, Width = 204, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14, 14, 10, 10), BackColor = Cores.Painel, AutoScroll = true };
+        trilho.Controls.Add(Titulo("Rotas"));
         foreach (var p in Posicoes)
         {
-            var chave = p[0]; var c = new Chip(p[1], Cores.Ouro);
-            c.Click += (o, e) => MudarAlvo(chave); chipsAlvo[chave] = c; linha1.Controls.Add(c);
+            var chave = p[0]; var it = new ItemRota(p[1]);
+            it.Click += (o, e) => MudarAlvo(chave); itensRota[chave] = it; trilho.Controls.Add(it);
         }
-        var linha2 = Linha();
+        var tAuto = Titulo("Automático"); tAuto.Margin = new Padding(0, 22, 0, 6); trilho.Controls.Add(tAuto);
+        chipAceitar = new Interruptor("Aceitar partida", Cores.Verde); chipRunas = new Interruptor("Aplicar runas", Cores.Roxo);
+        chipAceitar.Click += (o, e) => { lock (trava) aceitar = chipAceitar.Ligado; Salvar(); };
+        chipRunas.Click += (o, e) => { lock (trava) runas = chipRunas.Ligado; Salvar(); };
+        trilho.Controls.Add(chipAceitar); trilho.Controls.Add(chipRunas);
+        var versao = new Label { Text = "Versão " + Versao.Atual, AutoSize = true, ForeColor = Cores.Sutil, Font = new Font("Segoe UI", 8.5f), Margin = new Padding(0, 22, 0, 2) };
+        trilho.Controls.Add(versao);
+        var bVerificar = BotaoTexto("Verificar atualização"); bVerificar.Margin = new Padding(0); bVerificar.BackColor = Cores.Painel; bVerificar.Click += (o, e) => ProcurarAtualizacao(true);
+        trilho.Controls.Add(bVerificar);
+        chipAtualizar = new Chip("Atualizar", Cores.Ouro) { Visible = false, Selecionado = true, Margin = new Padding(0, 6, 0, 0) };
+        chipAtualizar.Click += (o, e) => Atualizar();
+        trilho.Controls.Add(chipAtualizar);
+
+        // Quadro da rota: picks e bans lado a lado como na seleção de campeões, feitiços junto dos picks.
+        var quadro = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(20, 12, 14, 6) };
+        tituloRota = new Label { AutoSize = true, ForeColor = Cores.Texto, Font = new Font("Segoe UI Semibold", 18f), Margin = new Padding(0, 0, 0, 6) };
+        quadro.Controls.Add(tituloRota);
+        var linhaP = Linha(); var linhaB = Linha();
+        rotuloPicks = RotuloFileira("Picks"); rotuloBans = RotuloFileira("Bans");
+        rotuloPicks.Click += (o, e) => MudarTipo("picks"); rotuloBans.Click += (o, e) => MudarTipo("bans");
+        linhaP.Controls.Add(rotuloPicks); linhaB.Controls.Add(rotuloBans);
         for (int i = 0; i < 5; i++)
         {
-            var v = vagas[i] = new Vaga(i + 1); int n = i;
-            v.MouseClick += (o, e) =>
+            int n = i;
+            var vp = vagasPick[i] = new Vaga(i + 1, false); var vb = vagasBan[i] = new Vaga(i + 1, true);
+            vp.MouseClick += (o, e) =>
             {
-                if (v.NaRuna(e.Location)) { AbrirRunas(v.Id); return; }
-                lock (trava) { var l = ListaAlvo(); if (n < l.Count) l.RemoveAt(n); else return; }
+                if (vp.NaRuna(e.Location)) { AbrirRunas(vp.Id); return; }
+                lock (trava) { var l = picks[alvo]; if (n < l.Count) l.RemoveAt(n); else { MudarTipo("picks"); return; } }
                 Salvar(); Desenhar();
             };
-            linha2.Controls.Add(v);
+            vb.MouseClick += (o, e) =>
+            {
+                lock (trava) { var l = bans[alvo]; if (n < l.Count) l.RemoveAt(n); else { MudarTipo("bans"); return; } }
+                Salvar(); Desenhar();
+            };
+            linhaP.Controls.Add(vp); linhaB.Controls.Add(vb);
         }
-        dica = new Label { AutoSize = false, Size = new Size(470, 68), ForeColor = Cores.Sutil, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(14, 4, 4, 4), Font = new Font("Segoe UI", 9.5f) };
-        linha2.Controls.Add(dica);
-        rotuloFeiticos = Rotulo("Feitiços:"); rotuloFeiticos.Margin = new Padding(3, 28, 3, 3); linha2.Controls.Add(rotuloFeiticos);
+        rotuloFeiticos = Rotulo("Feitiços"); rotuloFeiticos.Margin = new Padding(34, 27, 4, 3); linhaP.Controls.Add(rotuloFeiticos);
         for (int i = 0; i < 2; i++)
         {
             int n = i; var b = slotsFeitico[i] = new BotaoRuna(null, 50) { Margin = new Padding(4, 12, 4, 4), TextoAlt = i == 0 ? "D" : "F" };
@@ -1026,11 +1094,11 @@ class Janela : Form
             {
                 Feitico f; lock (trava) { var l = feiticos[alvo]; f = n < l.Count ? DadosRunas.Feiticos.FirstOrDefault(x => x.Id == l[n]) : null; }
                 Image im = null; if (f != null) DadosRunas.Imagens.TryGetValue(f.Icone, out im);
-                Dica.Mostrar(b, im, f != null ? f.Nome : "Feitiço " + (n == 0 ? "D" : "F"), "Feitiço de invocador · " + (alvo == "" ? "Qualquer rota" : NomePos(alvo)),
-                    (f != null ? f.Desc + "\n\n" : "") + "Clique para escolher." + (alvo == "" ? " Fora da selva, o Smite vira Ignite." : ""));
+                Dica.Mostrar(b, im, f != null ? f.Nome : "Feitiço " + (n == 0 ? "D" : "F"), "Feitiço de invocador de " + NomePos(alvo),
+                    (f != null ? f.Desc + "\n\n" : "") + "Clique para escolher.");
             };
             b.MouseLeave += (o, e) => Dica.Esconder();
-            linha2.Controls.Add(b);
+            linhaP.Controls.Add(b);
         }
         chipFlash = new Chip("Flash no D", Cores.Ouro) { Margin = new Padding(6, 22, 3, 3) };
         chipFlash.Click += (o, e) =>
@@ -1038,24 +1106,27 @@ class Janela : Form
             lock (trava) { flashNoF = !flashNoF; foreach (var l in feiticos.Values) Regras.OrdenarFlash(l, flashNoF); }
             Salvar(); Desenhar();
         };
-        linha2.Controls.Add(chipFlash);
-        var linha3 = Linha();
-        chipAceitar = new Chip("Aceitar partida", Cores.Verde); chipRunas = new Chip("Runas automáticas", Cores.Roxo);
-        chipAceitar.Click += (o, e) => { lock (trava) aceitar = !aceitar; chipAceitar.Selecionado = aceitar; Salvar(); };
-        chipRunas.Click += (o, e) => { lock (trava) runas = !runas; chipRunas.Selecionado = runas; Salvar(); };
-        linha3.Controls.Add(chipAceitar); linha3.Controls.Add(chipRunas);
-        var chipVerificar = new Chip("Verificar atualização", Cores.Azul);
-        chipVerificar.Click += (o, e) => ProcurarAtualizacao(true);
-        linha3.Controls.Add(chipVerificar);
-        chipAtualizar = new Chip("Atualizar", Cores.Ouro) { Visible = false, Selecionado = true };
-        chipAtualizar.Click += (o, e) => Atualizar();
-        linha3.Controls.Add(chipAtualizar);
-        editor.Controls.Add(linha1); editor.Controls.Add(linha2); editor.Controls.Add(linha3);
+        linhaP.Controls.Add(chipFlash);
+        dica = new Label { AutoSize = false, Size = new Size(330, 68), ForeColor = Cores.Sutil, TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(34, 4, 4, 4), Font = new Font("Segoe UI", 9.5f) };
+        linhaB.Controls.Add(dica);
+        quadro.Controls.Add(linhaP); quadro.Controls.Add(linhaB);
 
-        var filtros = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Padding = new Padding(14, 8, 14, 4), BackColor = Color.FromArgb(17, 22, 36) };
-        busca = new TextBox { Width = 190, BackColor = Cores.Cartao, ForeColor = Cores.Texto, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 11f), Margin = new Padding(3, 5, 12, 3) };
+        // O que o clique no campeão faz, busca e filtros.
+        var acoes = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Padding = new Padding(20, 10, 14, 0), BackColor = Cores.Painel };
+        acoes.Controls.Add(Rotulo("Ao clicar num campeão"));
+        foreach (var t in new[] { new[] { "picks", "Adicionar aos picks" }, new[] { "bans", "Adicionar aos bans" }, new[] { "runas", "Editar runas" } })
+        {
+            var chave = t[0]; var c = new Chip(t[1], chave == "picks" ? Cores.Azul : chave == "bans" ? Cores.Vermelho : Cores.Roxo);
+            c.Click += (o, e) => MudarTipo(chave); chipsTipo[chave] = c; acoes.Controls.Add(c);
+        }
+        var filtros = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Padding = new Padding(20, 6, 14, 8), BackColor = Cores.Painel };
+        var caixaBusca = new Panel { Size = new Size(210, 32), BackColor = Cores.Cartao, Margin = new Padding(3, 3, 12, 3), Padding = new Padding(10, 7, 8, 0) };
+        caixaBusca.Paint += (o, e) => { using (var pen = new Pen(busca.Focused ? Cores.Ouro : Cores.Linha)) e.Graphics.DrawRectangle(pen, 0, 0, caixaBusca.Width - 1, caixaBusca.Height - 1); };
+        busca = new TextBox { Dock = DockStyle.Fill, BackColor = Cores.Cartao, ForeColor = Cores.Texto, BorderStyle = BorderStyle.None, Font = new Font("Segoe UI", 10.5f) };
         busca.TextChanged += (o, e) => Filtrar();
-        filtros.Controls.Add(Rotulo("Buscar:")); filtros.Controls.Add(busca);
+        busca.GotFocus += (o, e) => caixaBusca.Invalidate(); busca.LostFocus += (o, e) => caixaBusca.Invalidate();
+        busca.HandleCreated += (o, e) => TextoDeAjuda(busca, "Buscar campeão");
+        caixaBusca.Controls.Add(busca); filtros.Controls.Add(caixaBusca);
         foreach (var c in Classes)
         {
             var chave = c[0]; var ch = new Chip(c[1], Cores.Ouro);
@@ -1064,19 +1135,38 @@ class Janela : Form
         }
         chipsClasse[""].Selecionado = true;
 
-        grade = new PainelSuave { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(10), BackColor = Cores.Fundo };
-        log = new TextBox { Dock = DockStyle.Bottom, Height = 84, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
-            BackColor = Color.FromArgb(8, 11, 19), ForeColor = Cores.Sutil, Font = new Font("Consolas", 9f), BorderStyle = BorderStyle.None };
-        Controls.Add(grade); Controls.Add(log); Controls.Add(filtros); Controls.Add(editor); Controls.Add(faixa);
+        grade = new PainelSuave { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(14), BackColor = Cores.Fundo };
+        var conteudo = new Panel { Dock = DockStyle.Fill, BackColor = Cores.Fundo };
+        conteudo.Controls.Add(grade); conteudo.Controls.Add(filtros); conteudo.Controls.Add(acoes); conteudo.Controls.Add(quadro);
+
+        // Registro: uma linha embaixo; "Ver registro" abre, "Copiar registro" copia tudo.
+        rodape = new Panel { Dock = DockStyle.Bottom, Height = 34, BackColor = Color.FromArgb(9, 13, 22) };
+        var barra = new Panel { Dock = DockStyle.Top, Height = 34 };
+        ultimaLinha = new Label { Dock = DockStyle.Fill, ForeColor = Cores.Sutil, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(14, 0, 0, 0), Font = new Font("Segoe UI", 9f), AutoEllipsis = true };
+        var bCopiar = BotaoTexto("Copiar registro"); bCopiar.Dock = DockStyle.Right;
+        var bVer = BotaoTexto("Ver registro"); bVer.Dock = DockStyle.Right;
+        bCopiar.Click += (o, e) => { if (log.TextLength > 0) { Clipboard.SetText(log.Text); faixa.Mostrar("Registro copiado", "Cole na conversa para mandar.", Cores.Verde, false); } };
+        bVer.Click += (o, e) =>
+        {
+            bool abrir = !log.Visible; log.Visible = abrir; rodape.Height = abrir ? 200 : 34; bVer.Text = abrir ? "Esconder registro" : "Ver registro";
+            if (abrir) { log.SelectionStart = log.TextLength; log.ScrollToCaret(); }
+        };
+        barra.Controls.Add(ultimaLinha); barra.Controls.Add(bCopiar); barra.Controls.Add(bVer);
+        log = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Visible = false,
+            BackColor = Color.FromArgb(9, 13, 22), ForeColor = Cores.Sutil, Font = new Font("Consolas", 9f), BorderStyle = BorderStyle.None };
+        rodape.Controls.Add(log); rodape.Controls.Add(barra);
+
+        Controls.Add(conteudo); Controls.Add(trilho); Controls.Add(rodape); Controls.Add(faixa);
 
         CarregarConfig();
-        chipAceitar.Selecionado = aceitar; chipRunas.Selecionado = runas;
-        MudarTipo("picks"); MudarAlvo("");
+        chipAceitar.Ligado = aceitar; chipRunas.Ligado = runas;
+        MudarTipo("picks"); MudarAlvo("top");
         DadosRunas.Mudou += Desenhar; // ícones das árvores nas vagas aparece quando as runas terminam de baixar
-        faixa.Mostrar("Bem-vindo ao AutoPick!", "Escolha a lista em cima e clique nos campeões na ordem de prioridade. Salva sozinho.", Cores.Ouro, false);
+        faixa.Mostrar("Bem-vindo ao AutoPick!", "Escolha uma rota à esquerda e clique nos campeões, na ordem de prioridade. Tudo é salvo sozinho.", Cores.Ouro, false);
 
         Shown += (o, e) =>
         {
+            ActiveControl = null; // abre sem a busca selecionada
             var fade = new System.Windows.Forms.Timer { Interval = 15 };
             fade.Tick += (a, b) => { Opacity = Math.Min(1, Opacity + 0.08); if (Opacity >= 1) fade.Stop(); };
             fade.Start();
@@ -1166,7 +1256,21 @@ class Janela : Form
     }
 
     static FlowLayoutPanel Linha() { return new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 4) }; }
-    static Label Rotulo(string t) { return new Label { Text = t, AutoSize = true, ForeColor = Cores.Sutil, Margin = new Padding(3, 9, 3, 3), Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) }; }
+    static Label Rotulo(string t) { return new Label { Text = t, AutoSize = true, ForeColor = Cores.Sutil, Margin = new Padding(3, 9, 8, 3), Font = new Font("Segoe UI", 9.5f) }; }
+    static Label Titulo(string t) { return new Label { Text = t, AutoSize = true, ForeColor = Cores.Sutil, Margin = new Padding(0, 0, 0, 6), Font = new Font("Segoe UI Semibold", 10f) }; }
+    // rótulo da fileira (Picks/Bans): clicável, colorido quando é a fileira que recebe o próximo campeão
+    static Label RotuloFileira(string t) { return new Label { Text = t, AutoSize = false, Size = new Size(56, 76), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Cores.Sutil, Font = new Font("Segoe UI Semibold", 11f), Cursor = Cursors.Hand }; }
+    static Button BotaoTexto(string t)
+    {
+        var b = new Button { Text = t, AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Cores.Sutil, BackColor = Color.FromArgb(9, 13, 22), Font = new Font("Segoe UI", 9f), Cursor = Cursors.Hand, Padding = new Padding(6, 0, 6, 0) };
+        b.FlatAppearance.BorderSize = 0; b.FlatAppearance.MouseOverBackColor = Cores.CartaoHover; b.FlatAppearance.MouseDownBackColor = Cores.Linha;
+        b.MouseEnter += (o, e) => b.ForeColor = Cores.Texto; b.MouseLeave += (o, e) => b.ForeColor = Cores.Sutil;
+        return b;
+    }
+    // texto de ajuda dentro da caixa de busca (só no Windows; em outro sistema ignora)
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, string l);
+    static void TextoDeAjuda(TextBox t, string texto) { try { SendMessage(t.Handle, 0x1501, (IntPtr)1, texto); } catch { } }
     public static string NomePos(string chave) { var p = Posicoes.FirstOrDefault(x => x[0] == chave); return p != null ? p[1] : chave; }
 
     List<string> ListaAlvo() { return tipo == "bans" ? bans[alvo] : picks[alvo]; }
@@ -1174,36 +1278,27 @@ class Janela : Form
     void MudarAlvo(string a)
     {
         alvo = a;
-        foreach (var kv in chipsAlvo) kv.Value.Selecionado = kv.Key == alvo;
-        AtualizarDica(); Desenhar();
+        foreach (var kv in itensRota) kv.Value.Selecionado = kv.Key == alvo;
+        tituloRota.Text = NomePos(alvo);
+        dica.Text = "Cada rota usa só a própria lista. Se a rota em que você cair estiver vazia, o app não escolhe nem bane.";
+        Desenhar();
     }
 
     void MudarTipo(string t)
     {
         tipo = t;
         foreach (var kv in chipsTipo) kv.Value.Selecionado = kv.Key == tipo;
-        foreach (var v in vagas) v.Visible = tipo != "runas";
-        foreach (var b in slotsFeitico) b.Visible = tipo != "runas";
-        rotuloFeiticos.Visible = tipo != "runas"; chipFlash.Visible = tipo != "runas";
-        foreach (var kv in chipsAlvo) kv.Value.Visible = tipo != "runas";
-        rotuloRota.Visible = tipo != "runas";
-        AtualizarDica(); Desenhar();
-    }
-
-    void AtualizarDica()
-    {
-        var rota = alvo == "" ? "Qualquer rota" : NomePos(alvo);
-        dica.Size = new Size(tipo == "runas" ? 820 : 470, 68);
-        dica.Text = tipo == "runas" ? "Clique num campeão para montar as runas dele, igual ao cliente. Campeão sem runas salvas (sem o R roxo) usa a recomendação do LoL."
-            : tipo == "bans" ? "Bans de " + rota + ", em ordem. Espera 5s e pula quem um aliado quer jogar." + (alvo == "" ? " Usada quando a lista da rota acaba ou não tem rota." : " Se nenhum servir, usa Qualquer.")
-            : "Picks de " + rota + ", em ordem." + (alvo == "" ? " Usada quando a rota não tem ninguém livre, ou em modos sem rota." : " Se nenhum estiver livre, usa Qualquer.");
+        rotuloPicks.ForeColor = tipo == "picks" ? Cores.Azul : Cores.Sutil;
+        rotuloBans.ForeColor = tipo == "bans" ? Cores.Vermelho : Cores.Sutil;
+        if (tipo == "runas") faixa.Mostrar("Editar runas", "Clique num campeão para montar a página de runas dele.", Cores.Roxo, false);
+        Desenhar();
     }
 
     string NomeDe(string id) { var c = cartoes.FirstOrDefault(x => x.Id == id); return c != null ? c.Nome : id; }
 
     void Desenhar()
     {
-        List<string> l, lp, lb; List<int> lf; lock (trava) { lp = picks[alvo].ToList(); lb = bans[alvo].ToList(); lf = feiticos[alvo].ToList(); }
+        List<string> lp, lb; List<int> lf; lock (trava) { lp = picks[alvo].ToList(); lb = bans[alvo].ToList(); lf = feiticos[alvo].ToList(); }
         chipFlash.Text = "Flash no " + (flashNoF ? "F" : "D"); chipFlash.Invalidate();
         for (int i = 0; i < 2; i++)
         {
@@ -1211,11 +1306,19 @@ class Janela : Form
             slotsFeitico[i].Icone = f != null ? f.Icone : null; slotsFeitico[i].TextoAlt = f != null ? f.Nome : (i == 0 ? "D" : "F");
             slotsFeitico[i].Marcar(f != null, false);
         }
-        l = tipo == "bans" ? lb : lp;
         var cor = tipo == "bans" ? Cores.Vermelho : Cores.Azul;
+        foreach (var kv in itensRota)
+        {
+            int np, nb; lock (trava) { np = picks[kv.Key].Count; nb = bans[kv.Key].Count; }
+            kv.Value.Resumo = np + nb == 0 ? "Vazia" : np + (np == 1 ? " pick, " : " picks, ") + nb + (nb == 1 ? " ban" : " bans");
+            kv.Value.Invalidate();
+        }
         for (int i = 0; i < 5; i++)
         {
-            string id = i < l.Count ? l[i] : null; Image img = null;
+            string idb = i < lb.Count ? lb[i] : null; Image imb = null;
+            if (idb != null) icones.TryGetValue(idb, out imb);
+            vagasBan[i].Definir(idb, idb == null ? null : NomeDe(idb), imb, Cores.Vermelho, null, null);
+            string id = i < lp.Count ? lp[i] : null; Image img = null;
             if (id != null) icones.TryGetValue(id, out img);
             Image prim = null, sec = null; Pagina pg;
             if (id != null && runasCamp.TryGetValue(id, out pg))
@@ -1224,7 +1327,7 @@ class Janela : Form
                 if (ep != null) DadosRunas.Imagens.TryGetValue(ep.Icone, out prim);
                 if (es != null) DadosRunas.Imagens.TryGetValue(es.Icone, out sec);
             }
-            vagas[i].Definir(id, id == null ? null : NomeDe(id), img, cor, prim, sec);
+            vagasPick[i].Definir(id, id == null ? null : NomeDe(id), img, Cores.Azul, prim, sec);
         }
         foreach (var c in cartoes)
         {
@@ -1272,18 +1375,16 @@ class Janela : Form
         flashNoF = J.S(J.G(d, "flash")) == "F";
         Func<object, List<string>> lista = o => J.A(o).Select(J.S).Where(x => x != "").Take(5).ToList();
         var pk = J.G(d, "picks");
-        if (pk is object[]) picks[""] = lista(pk); // config antigo: uma lista só
-        else foreach (var p in Posicoes) picks[p[0]] = lista(J.G(J.D(pk), Chave(p[0])) ?? J.G(J.D(pk), p[0]));
+        foreach (var p in Posicoes) picks[p[0]] = lista(J.G(J.D(pk), Chave(p[0])) ?? J.G(J.D(pk), p[0]));
         var bn = J.G(d, "bans");
-        if (bn is object[]) bans[""] = lista(bn); // config antigo: uma lista só
-        else foreach (var p in Posicoes) bans[p[0]] = lista(J.G(J.D(bn), Chave(p[0])) ?? J.G(J.D(bn), p[0]));
+        foreach (var p in Posicoes) bans[p[0]] = lista(J.G(J.D(bn), Chave(p[0])) ?? J.G(J.D(bn), p[0]));
         var fe = J.D(J.G(d, "feiticos"));
         if (fe != null) foreach (var p in Posicoes) feiticos[p[0]] = J.A(J.G(fe, Chave(p[0]))).Select(J.I).Where(x => x > 0).Take(2).ToList();
         var pg = J.D(J.G(d, "paginas"));
         if (pg != null) foreach (var kv in pg) { var x = Pagina.De(kv.Value); if (x != null) runasCamp[kv.Key] = x; }
     }
 
-    // O leitor de JSON não aceita chave vazia: a lista Qualquer ("") vai para o arquivo como "qualquer".
+    // shortcut: "" (antiga lista Qualquer) não existe mais; Chave continua para ler configs antigos sem quebrar.
     static string Chave(string pos) { return pos == "" ? "qualquer" : pos; }
 
     void Salvar()
@@ -1299,7 +1400,7 @@ class Janela : Form
     {
         var linha = DateTime.Now.ToString("HH:mm:ss") + "  " + t;
         try { File.AppendAllText(Path.Combine(Pasta, "autopick.log"), linha + Environment.NewLine); } catch { }
-        Na(() => log.AppendText(linha + Environment.NewLine));
+        Na(() => { log.AppendText(linha + Environment.NewLine); ultimaLinha.Text = linha; });
     }
     void Na(Action a)
     {
@@ -1341,7 +1442,7 @@ class Janela : Form
                         if (bytes == null) { using (var w = new WebClient()) bytes = w.DownloadData("https://ddragon.leagueoflegends.com/cdn/" + versao + "/img/champion/" + c.Id + ".png"); File.WriteAllBytes(arq, bytes); }
                         Image img;
                         using (var ms = new MemoryStream(bytes)) using (var tmp = Image.FromStream(ms)) img = new Bitmap(tmp, 80, 80);
-                        Na(() => { icones[c.Id] = img; c.Icone = img; if (vagas.Any(v => v.Id == c.Id)) Desenhar(); });
+                        Na(() => { icones[c.Id] = img; c.Icone = img; if (vagasPick.Concat(vagasBan).Any(v => v.Id == c.Id)) Desenhar(); });
                     }
                     catch { }
                 });
@@ -1436,6 +1537,7 @@ class Janela : Form
                 }
                 if (fase != "ChampSelect")
                 {
+                    if (faseVista != null) Na(() => { foreach (var v in vagasPick.Concat(vagasBan)) v.AoVivo = null; }); // saiu da seleção: limpa as etiquetas
                     falhas.Clear(); marcados.Clear(); inicioBan.Clear(); runasPara = 0; posVista = null; faseVista = null; marcadoPorMim = 0;
                     Estado(TextoFase(fase), fase == "Matchmaking" ? "Assim que achar, eu aceito." : "", fase == "Matchmaking" ? Cores.Azul : fase == "InProgress" ? Cores.Verde : Cores.Sutil, fase == "Matchmaking");
                     continue;
@@ -1459,9 +1561,9 @@ class Janela : Form
                         int sf = con.Req("PATCH", "/lol-champ-select/v1/session/my-selection", J.Escrever(new Dictionary<string, object> { { "spell1Id", fs[0] }, { "spell2Id", fs[1] } }), out tx);
                         Log(sf < 400 ? "Feitiços: " + DadosRunas.NomeFeitico(fs[0]) + " + " + DadosRunas.NomeFeitico(fs[1]) : "O cliente recusou os feitiços (erro " + sf + ": " + tx + ")");
                     }
-                    Na(() => MudarAlvo(conhecida ? pos : ""));
+                    if (conhecida) Na(() => MudarAlvo(pos));
                     Estado(pos == "" ? "Seleção de campeões" : "Você caiu de " + NomePos(pos) + "!",
-                        pos == "" ? "Modo sem rota: usando picks e bans de Qualquer." : "Usando picks e bans de " + NomePos(pos) + " (se acabarem, Qualquer).", Cores.Azul, false);
+                        pos == "" ? "Modo sem rota: o AutoPick não escolhe nem bane." : "Usando picks e bans de " + NomePos(pos) + ".", Cores.Azul, false);
                     List<int> vp, vb; lock (trava) { vp = Converter(Regras.ListaPick(picks, pos), avisados); vb = Converter(Regras.ListaPick(bans, pos), avisados); }
                     con.Req("GET", "/lol-gameflow/v1/session", null, out tx);
                     var fila = J.D(J.G(J.D(J.G(J.D(J.Ler(tx)), "gameData")), "queue"));
@@ -1522,7 +1624,7 @@ class Janela : Form
                         var h = Regras.Decidir(s, tentar, lb, null, meuPick);
                         if (h.Campeao == 0 || h.Campeao == marcado || h.Campeao == marcadoPorMim) break;
                         int sm = con.Req("PATCH", "/lol-champ-select/v1/session/actions/" + J.I(J.G(meuPick, "id")), J.Escrever(new Dictionary<string, object> { { "championId", h.Campeao } }), out tx);
-                        if (sm < 400) { marcado = marcadoPorMim = h.Campeao; Log("Pick marcado: " + Nome(marcado)); break; }
+                        if (sm < 400) { marcado = marcadoPorMim = h.Campeao; Log("Pick marcado: " + Nome(marcado)); AoVivo(marcado, "Marcado", false); break; }
                         if (marcados.Add(J.I(J.G(meuPick, "id")) + ":" + h.Campeao)) Log("Não deu para marcar " + Nome(h.Campeao) + " (erro " + sm + " " + tx + "). Marco o próximo e tento de novo na sua vez.");
                         tentar.Remove(h.Campeao);
                     }
@@ -1542,15 +1644,20 @@ class Janela : Form
                 if (d == null) continue;
                 string verbo = d.Ban ? "banir" : "escolher";
                 string pulos = string.Join(", ", d.Pulados.Select(p => Nome(p.Key) + " (" + p.Value + ")"));
-                if (d.Campeao == 0) { Estado("Sua vez de " + verbo + ", mas ninguém da lista serve", pulos == "" ? "Lista vazia. " + ondeEstou : pulos, Cores.Laranja, true); continue; }
+                if (d.Campeao == 0)
+                {
+                    Estado("Sua vez de " + verbo, pulos == "" ? (pos == "" ? "Modo sem rota: o AutoPick não age, faça você." : "A lista de " + (d.Ban ? "bans" : "picks") + " de " + NomePos(pos) + " está vazia: faça você.")
+                        : "Ninguém da lista serve: " + pulos, Cores.Laranja, true);
+                    continue;
+                }
                 if (pulos != "") Log("Pulei: " + pulos);
                 // marca e conclui pelo próprio PATCH (completed: true), o jeito que o cliente aceita; o POST /complete separado não valia
                 string url = "/lol-champ-select/v1/session/actions/" + J.I(J.G(d.Acao, "id"));
                 int st = con.Req("PATCH", url, J.Escrever(new Dictionary<string, object> { { "championId", d.Campeao }, { "completed", false } }), out tx);
                 if (st < 400) { Thread.Sleep(200); st = con.Req("PATCH", url, J.Escrever(new Dictionary<string, object> { { "championId", d.Campeao }, { "completed", true } }), out tx); }
                 if (st >= 400) { falhas.Add(d.Campeao); Log("O cliente recusou " + verbo + " " + Nome(d.Campeao) + " (erro " + st + ": " + tx + "). Vou para o próximo da lista."); }
-                else if (d.Ban) Estado("Banido: " + Nome(d.Campeao), ondeEstou, Cores.Vermelho, false);
-                else Estado("Travado: " + Nome(d.Campeao) + "!", ondeEstou, Cores.Azul, false);
+                else if (d.Ban) { Estado("Banido: " + Nome(d.Campeao), ondeEstou, Cores.Vermelho, false); AoVivo(d.Campeao, "Banido", true); }
+                else { Estado("Travado: " + Nome(d.Campeao) + "!", ondeEstou, Cores.Azul, false); AoVivo(d.Campeao, "Travado", false); }
             }
             catch (Exception e)
             {
@@ -1675,6 +1782,13 @@ class Janela : Form
     }
 
     string Nome(int id) { string n; return nomesLcu.TryGetValue(id, out n) ? n : id.ToString(); }
+
+    // Mostra no quadro o que o app acabou de fazer (só uma etiqueta por fileira).
+    void AoVivo(int campeaoLcu, string selo, bool ban)
+    {
+        string dd; if (!ddPorKey.TryGetValue(campeaoLcu, out dd)) return;
+        Na(() => { foreach (var v in ban ? vagasBan : vagasPick) v.AoVivo = v.Id == dd ? selo : null; });
+    }
 }
 
 static class Programa
@@ -1734,16 +1848,14 @@ static class Programa
             Tuple.Create("tag estranha não atualiza", !Atualizador.MaisNova("ultima", "1.0.0") && Atualizador.MaisNova("1.0.1", "0.0.0")),
             Tuple.Create("descrição sem HTML", DadosRunas.Limpar("Dá <b>dano</b>&nbsp;extra.<br><br><br>Recarga: 10s") == "Dá dano\u00a0extra.\n\nRecarga: 10s"),
             Tuple.Create("sem filtro do cliente", Regras.Decidir(pick, new List<int> { 1, 2, 3 }, new List<int>(), null).Campeao == 3),
-            Tuple.Create("feitiços da rota", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4, 11 } }, { "jungle", new List<int> { 11, 4 } } }, "jungle", true)) == "11,4"),
+            Tuple.Create("feitiços da rota", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "jungle", new List<int> { 11, 4 } } }, "jungle", true)) == "11,4"),
             Tuple.Create("Flash no D", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "jungle", new List<int> { 11, 4 } } }, "jungle", false)) == "4,11"),
-            Tuple.Create("Qualquer fora da selva: Smite vira Ignite", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4, 11 } } }, "top", false)) == "4,14"),
-            Tuple.Create("Flash no F com Smite trocado", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4, 11 } } }, "top", true)) == "14,4"),
-            Tuple.Create("Smite com Ignite vira Teleporte", string.Join(",", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 11, 14 } } }, "middle", false)) == "12,14"),
+            Tuple.Create("rota sem feitiços não mexe", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "jungle", new List<int> { 4, 11 } } }, "top", false) == null),
             Tuple.Create("sem feitiços configurados", Regras.FeiticosPara(new Dictionary<string, List<int>> { { "", new List<int> { 4 } } }, "top", false) == null),
             Tuple.Create("não age fora da vez", Regras.Decidir(fora, new List<int> { 3 }, new List<int>(), todos) == null),
-            Tuple.Create("posição primeiro, depois reserva", string.Join(",", Regras.ListaPick(listas, "middle")) == "Ahri,Zed,Lux"),
-            Tuple.Create("sem posição usa reserva", string.Join(",", Regras.ListaPick(listas, "")) == "Lux,Ahri"),
-            Tuple.Create("posição vazia usa reserva", string.Join(",", Regras.ListaPick(listas, "top")) == "Lux,Ahri"),
+            Tuple.Create("só a lista da rota", string.Join(",", Regras.ListaPick(listas, "middle")) == "Ahri,Zed"),
+            Tuple.Create("sem rota não escolhe", Regras.ListaPick(listas, "").Count == 0),
+            Tuple.Create("rota vazia não escolhe", Regras.ListaPick(listas, "top").Count == 0),
         };
         foreach (var t in testes.Where(t => !t.Item2)) Console.WriteLine("FALHOU: " + t.Item1);
         Console.WriteLine(testes.All(t => t.Item2) ? "ok" : "erro");
